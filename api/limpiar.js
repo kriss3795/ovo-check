@@ -54,16 +54,6 @@ export default async function handler(req, res) {
       if (!correoListo || !g.correos?.length) continue;
       await transporte().sendMail(correoAbandono(g)).then(() => avisosBorrado++).catch((e) => console.error('No se pudo avisar el borrado', e?.message));
     }
-    // El primer día de cada mes: recordatorio de respaldo a los supervisores (el plan gratuito no hace copias).
-    if (avisosListos && new Date().getUTCDate() === 1 && (await tocaTurno('respaldo-mes', 20))) {
-      for (const g of (await rpc('oc_respaldo_mensual')) ?? []) {
-        avisos += await notificar(g.supervisores, {
-          titulo: 'Respaldo del mes',
-          texto: `${g.granja}: descarga una copia de tus datos en Ajustes, Descargar datos. Toma un minuto.`,
-          etiqueta: 'respaldo',
-        });
-      }
-    }
     abandonados = (await rpc('oc_limpieza'))?.planteles_abandonados ?? 0;
     const u = await rpc('oc_uso');
     // Esta dirección es pública: solo muestra el porcentaje. El detalle va por correo.

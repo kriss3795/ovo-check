@@ -1384,12 +1384,17 @@ language sql stable security definer set search_path = public, pg_temp as $$
   ) t on t.lista is not null;
 $$;
 
--- Planteles en uso, con las suscripciones de sus supervisores, para el recordatorio mensual de respaldo.
-create or replace function oc_respaldo_mensual(p jsonb) returns jsonb
+-- Recordatorio diario de respaldo: planteles que recibieron registros hoy y cuyos supervisores todavía no descargan
+-- el respaldo del día. (Solo el servidor de la app.)
+drop function if exists oc_respaldo_mensual(jsonb);
+create or replace function oc_respaldo_diario(p jsonb) returns jsonb
 language sql stable security definer set search_path = public, pg_temp as $$
-  select coalesce(jsonb_agg(jsonb_build_object('granja', g.nombre, 'supervisores', oc__suscripciones(g, 'supervisor'))), '[]'::jsonb)
+  select coalesce(jsonb_agg(jsonb_build_object('granja', g.nombre, 'registros', n.hoy, 'supervisores', oc__suscripciones(g, 'supervisor'))), '[]'::jsonb)
   from oc_granjas g
-  where exists (select 1 from oc_registros r where r.granja_id = g.id and r.recibido > now() - interval '35 days');
+  join lateral (select count(*)::int as hoy from oc_registros r
+                where r.granja_id = g.id
+                  and r.fecha = (now() at time zone coalesce(oc__ajuste('zona_horaria'), 'America/Santiago'))::date) n on n.hoy > 0
+  where coalesce(g.config -> 'respaldo' ->> 'fecha', '') <> (now() at time zone coalesce(oc__ajuste('zona_horaria'), 'America/Santiago'))::date::text;
 $$;
 
 -- ---------------------------------------------------------------------
@@ -1474,7 +1479,7 @@ begin
     end if;
     if f.proname in ('oc_fotos_vencidas', 'oc_recuperacion_pedir', 'oc_avisos_pendientes', 'oc_pendientes_del_dia',
                      'oc_fotos_por_vencer', 'oc_suscripcion_propia', 'oc_suscripciones_borrar', 'oc_equipos_por_avisar', 'oc_turno',
-                     'oc_uso', 'oc_limpieza', 'oc_abandono_por_avisar', 'oc_telefonos_atrasados', 'oc_respaldo_mensual') then
+                     'oc_uso', 'oc_limpieza', 'oc_abandono_por_avisar', 'oc_telefonos_atrasados', 'oc_respaldo_diario') then
       execute format('grant execute on function %s to service_role', f.firma);
     end if;
   end loop;

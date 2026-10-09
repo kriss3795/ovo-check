@@ -53,6 +53,18 @@ export default async function handler(req, res) {
         }
       }
     }
+    // Al cierre del día: recordar a los supervisores que descarguen el respaldo de lo registrado hoy.
+    if (bloque === 'tarde') {
+      // Con el servidor al día solo llegan los planteles con registros de hoy y sin respaldo; con uno anterior, todos los que están en uso.
+      const lista = await rpc('oc_respaldo_diario').catch(() => rpc('oc_respaldo_mensual').catch(() => []));
+      for (const g of lista ?? []) {
+        enviadas += await notificar(g.supervisores, {
+          titulo: 'Respalda la información de hoy',
+          texto: `${g.granja}${g.registros ? `: ${g.registros} ${g.registros === 1 ? 'registro' : 'registros'} hoy` : ''}. Abre la app, toca "Descargar respaldo" y guarda el archivo fuera del teléfono.`,
+          etiqueta: 'respaldo',
+        });
+      }
+    }
     return res.status(200).json({ ok: true, bloque, granjas: granjas?.length ?? 0, enviadas });
   } catch (e) {
     return res.status(502).json({ error: String(e?.message ?? e) });

@@ -136,7 +136,7 @@ Cuando sale un lote y entra otro no hay que eliminar el galpón ni crearlo de nu
 | Fotos por borrarse (a los 30 días) | Tarjeta en Hoy con botón para descargarlas, notificación los lunes, y un aviso dentro de cada registro cuando a su foto le quedan 7 días o menos |
 | Datos que llevan más de 6 horas guardados solo en un teléfono | Tarjeta roja en ese teléfono, también antes de entrar: "No borres la app ni los datos del navegador" |
 | Un teléfono sin conectarse hace más de un día y con registros sin enviar | Notificación diaria al supervisor, con el nombre de la persona y cuántos registros son |
-| Respaldo | Notificación al supervisor el primer día de cada mes para descargar sus datos |
+| Respaldo de cada día | Tarjeta en Hoy al cierre de la jornada (desde las 17:00) con el botón **Descargar respaldo**; si quedó un día sin respaldar se ve a cualquier hora. Además, una notificación cada noche si ese día hubo registros y ningún supervisor lo descargó. El archivo trae todo desde el último respaldo y queda anotado quién lo hizo |
 | Plantel abandonado (nunca registró nada y nadie lo abrió en meses) | Correo a sus supervisores 30 días antes de eliminarlo. Nunca se elimina sin ese aviso, y basta abrir la app para conservarlo |
 | Servidor o espacio de fotos lleno | Aviso en la app a operarios y supervisores; nada se pierde, todo espera en cada teléfono |
 | Eliminar plantel, galpón, tarea o persona, y desvincular un teléfono | Cada uno pide confirmar y dice qué se conserva |
@@ -275,7 +275,7 @@ Si la base de datos gratuita de Supabase se pasa de su límite, Supabase la deja
 - Los topes viven en la tabla `oc_ajustes` de Supabase (`max_galpones`, `max_granjas`, `max_granjas_dia`, `max_mb_datos`, `max_mb_total`, `max_mb_fotos_granja`, `max_fotos_granja`, `max_registros_dia`, `dias_fotos`).
 - Un plantel de prueba se borra en Ajustes > Plantel > Eliminar este plantel.
 - Supabase pausa los proyectos gratuitos tras 7 días sin uso. La tarea diaria de Vercel lo mantiene despierto.
-- El plan gratuito de Supabase no hace copias de respaldo. Conviene que cada supervisor use **Descargar datos** de vez en cuando.
+- El plan gratuito de Supabase no hace copias de respaldo. Por eso la app le recuerda al supervisor descargar el respaldo cada día y guardarlo fuera del teléfono.
 
 **Nota sobre Vercel:** su plan gratuito está pensado para uso personal o no comercial. Para probar y mostrar la app sirve; si después la vendes a empresas, corresponde pasar al plan Pro (20 dólares al mes) o mover la publicación a otro servicio. Los datos no se ven afectados porque viven en Supabase.
 

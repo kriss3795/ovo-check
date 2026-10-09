@@ -115,6 +115,8 @@ export interface Config {
   galpones: Galpon[];
   tareas: Tarea[];
   logica?: Partial<Logica>;
+  /** Último día en que un supervisor descargó el respaldo de los datos, y quién. */
+  respaldo?: { fecha: string; por: string };
 }
 
 export interface FotoRef {

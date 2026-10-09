@@ -9,7 +9,7 @@ import { anotarPausa, cargaDiaria, limitesDe, limitesSugeridos, LOGICA_DEFECTO, 
 import { mensajeError } from '../lib/nube';
 import { BIBLIOTECA, GRUPOS_TAREAS, RUTINA_CLASICA, campoAvesVivas, campoVacio, tareaDesde, tareaVacia } from '../lib/plantillas';
 import type { Campo, Config, Galpon, Tarea, Usuario } from '../lib/tipos';
-import { DIAS_CORTOS, claveDebil, fechaLarga, fechaLocal, haceCuanto, hashPin, iniciales, nombreDia, num, uid } from '../lib/util';
+import { DIAS_CORTOS, claveDebil, fechaLarga, fechaLocal, fechaRelativa, haceCuanto, hashPin, iniciales, nombreDia, num, uid } from '../lib/util';
 import { Barra, Confirmar, Hoja, ICONOS, IconoTarea, Interruptor, aNumero } from './base';
 import { CambiarClave, correoValido } from './inicio';
 import { BotonInstalar, PaginaAvisos } from './avisos';
@@ -83,7 +83,7 @@ export function Ajustes() {
       </div>
       <p className="seccion">Datos y cuenta</p>
       <div className="lista">
-        {fila(<Database size={24} />, 'Descargar datos', 'Todos los registros en un archivo para Excel', () => setExportar(true))}
+        {fila(<Database size={24} />, 'Descargar datos', config.respaldo ? `Último respaldo: ${fechaRelativa(config.respaldo.fecha).toLowerCase()}, ${config.respaldo.por}` : 'Todos los registros en un archivo para Excel', () => setExportar(true))}
         {fila(<Images size={24} />, 'Descargar fotos', `En la nube se guardan ${fotosNube?.dias ?? 30} días y luego se borran`, () => setBajarFotos(true))}
         {fila(<Bell size={24} />, 'Notificaciones', TEXTO_AVISOS[avisos], () => ir({ p: 'ajuste', cual: 'avisos' }))}
         {fila(<Settings2 size={24} />, 'Plantel', 'Nombre y espacio para fotos', () => ir({ p: 'ajuste', cual: 'granja' }))}

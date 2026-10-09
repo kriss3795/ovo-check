@@ -3,7 +3,7 @@ import {
   Ban, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Download, History, House, MapPin, Pencil,
   Settings, ShieldAlert, Smartphone, TriangleAlert, CircleX, Images,
 } from 'lucide-react';
-import { administrar, ahora, asegurarPeriodo, revisar, traerPeriodo } from '../lib/app';
+import { administrar, ahora, asegurarPeriodo, guardarConfig, revisar, traerPeriodo } from '../lib/app';
 import { avisar, cambiarRuta, ir, useEstado } from '../lib/estado';
 import { armarCsv, entregarArchivo } from '../lib/exportar';
 import { anotarBajada, descargarFotos, fotosDe, fotosPorVencer, nombreFoto } from '../lib/fotos';
@@ -194,6 +194,65 @@ function PrimerosPasos() {
  * Vigilancia del plantel: cada equipo nuevo que entra queda a la vista hasta que un supervisor dice que lo conoce,
  * y se avisa si alguien está probando claves del plantel.
  */
+const nombreArchivo = (plantel: string) =>
+  plantel.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+/** Anota en el plantel que hoy se descargó el respaldo, para que no se le siga recordando a ningún supervisor. */
+async function anotarRespaldo(hoy: string, por: string) {
+  try {
+    await guardarConfig((c) => void (c.respaldo = { fecha: hoy, por }));
+  } catch {
+    /* si no se pudo anotar, el recordatorio vuelve a aparecer: no se pierde nada */
+  }
+}
+
+/**
+ * Recordatorio diario de respaldo: al final del día (desde las 17:00), o a cualquier hora si quedó un día sin respaldar.
+ * El archivo trae todo lo registrado desde el último respaldo, así no quedan vacíos entre uno y otro.
+ */
+function TarjetaRespaldo() {
+  const config = useEstado((e) => e.config)!;
+  const hoy = useEstado((e) => e.hoy);
+  const usuario = useEstado((e) => e.usuario)!;
+  const revisiones = useEstado((e) => e.revisiones);
+  const hayRegistros = useEstado((e) => e.registros.length > 0);
+  useEstado((e) => e.tic);
+  const [ocupado, setOcupado] = useState(false);
+  const ultimo = config.respaldo?.fecha ?? null;
+  if (!hayRegistros || (ultimo !== null && ultimo >= hoy)) return null;
+  const atrasado = ultimo === null ? (config.granja.creado ?? hoy) < hoy : ultimo < sumarDias(hoy, -1);
+  if (!atrasado && ahora().getHours() < 17) return null;
+
+  const descargar = async () => {
+    setOcupado(true);
+    try {
+      const desde = ultimo ?? '2020-01-01';
+      const regs = await traerPeriodo(desde, hoy);
+      if (regs.length) {
+        await entregarArchivo(`ovocheck-${nombreArchivo(config.granja.nombre)}-respaldo-${ultimo ? `${ultimo}-a-` : 'hasta-'}${hoy}.csv`, armarCsv(config, regs, revisiones));
+      }
+      await anotarRespaldo(hoy, usuario.nombre);
+      avisar(regs.length ? `Respaldo descargado con ${regs.length} registros. Guárdalo fuera de este equipo.` : 'No había registros nuevos que respaldar', 'ok');
+    } catch (e) {
+      avisar(mensajeError(e), 'mal');
+    } finally {
+      setOcupado(false);
+    }
+  };
+  return (
+    <div className="tarjeta aviso-atencion">
+      <p className="fuerte">{atrasado ? `Falta respaldar ${ultimo ? `desde ${fechaRelativa(ultimo).toLowerCase()}` : 'la información del plantel'}` : 'Respalda la información de hoy'}</p>
+      <p className="chico">
+        Descarga el archivo y guárdalo fuera de este equipo: en tu correo, en Drive o en un computador. Es tu copia por si algo falla.{' '}
+        {ultimo ? `Último respaldo: ${fechaRelativa(ultimo).toLowerCase()}, ${config.respaldo!.por}.` : 'Todavía no se ha hecho ningún respaldo.'}
+      </p>
+      <button className="boton chico" style={{ marginTop: 8 }} disabled={ocupado} onClick={descargar}>
+        <Download size={20} aria-hidden /> {ocupado ? 'Preparando…' : 'Descargar respaldo'}
+      </button>
+    </div>
+  );
+}
+
 function TarjetaSeguridad() {
   const config = useEstado((e) => e.config)!;
   const dispositivos = useEstado((e) => e.dispositivos);
@@ -299,6 +358,7 @@ function Hoy() {
       <AvisoSinEnviar />
       <TarjetaAvisos />
       <TarjetaSeguridad />
+      <TarjetaRespaldo />
       <PrimerosPasos />
       {fotos && (fotos.lleno || fotos.usadas >= fotos.max * 0.9) && (
         <div className="tarjeta aviso-atencion">
@@ -907,6 +967,7 @@ function ResumenTarea() {
 export function HojaExportar({ cerrar }: { cerrar: () => void }) {
   const config = useEstado((e) => e.config)!;
   const hoy = useEstado((e) => e.hoy);
+  const usuario = useEstado((e) => e.usuario)!;
   const revisiones = useEstado((e) => e.revisiones);
   const [ocupado, setOcupado] = useState('');
   const [error, setError] = useState('');
@@ -926,8 +987,11 @@ export function HojaExportar({ cerrar }: { cerrar: () => void }) {
         setError('No hay registros en ese período.');
         return;
       }
-      const nombre = `ovocheck-${config.granja.nombre.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${p.id === 'todo' ? 'completo' : `${p.desde}-a-${hoy}`}.csv`;
+      const nombre = `ovocheck-${nombreArchivo(config.granja.nombre)}-${p.id === 'todo' ? 'completo' : `${p.desde}-a-${hoy}`}.csv`;
       const r = await entregarArchivo(nombre, armarCsv(config, regs, revisiones));
+      // Si esta descarga cubre todo lo que faltaba respaldar, cuenta como el respaldo del día.
+      const ultimo = config.respaldo?.fecha ?? null;
+      if (ultimo ? p.desde <= ultimo : p.id === 'todo') await anotarRespaldo(hoy, usuario.nombre);
       avisar(r === 'descargado' ? `Archivo descargado con ${regs.length} registros` : 'Archivo listo', 'ok');
       cerrar();
     } catch (e) {
