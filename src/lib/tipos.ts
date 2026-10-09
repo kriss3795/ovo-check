@@ -57,6 +57,22 @@ export interface Campo {
    * compara con lo anotado la vez anterior y, si no calza, se lo marca al supervisor para que pregunte.
    */
   saldo?: boolean;
+  /**
+   * Límites lógicos del resultado (el indicador si lo hay; si no, el número o el consumo del día). Fuera de ellos
+   * se alerta al supervisor. El operario no los ve. Sin definir = se usan los que sugiere la app para ese tipo de dato;
+   * null = sin límite.
+   */
+  min?: number | null;
+  max?: number | null;
+}
+
+/** Alertas que cruzan datos. Solo las ve y las ajusta el supervisor. */
+export interface Logica {
+  /** Litros de agua por kilo de alimento. */
+  ratioMin: number | null;
+  ratioMax: number | null;
+  /** Cambio de un día a otro en el consumo de agua o de alimento, en porcentaje. */
+  cambioPct: number | null;
 }
 
 export interface Tarea {
@@ -93,6 +109,7 @@ export interface Config {
   usuarios: Usuario[];
   galpones: Galpon[];
   tareas: Tarea[];
+  logica?: Partial<Logica>;
 }
 
 export interface FotoRef {
@@ -103,6 +120,7 @@ export interface FotoRef {
 export type Flag =
   | 'problema' // el operario marcó o reportó un problema
   | 'retrocede' // medidor acumulativo con lectura menor que la anterior
+  | 'ilogico' // algún dato quedó fuera de lo lógico (el detalle va en 'avisos')
   | 'no_calza' // las aves vivas anotadas no calzan con las de la vez anterior menos las muertas de hoy
   | 'lejos' // GPS lejos del galpón
   | 'sin_foto' // la tarea pedía foto y no se pudo tomar
@@ -142,6 +160,11 @@ export interface Registro {
   /** Aves y lote del galpón al momento de registrar: con esos datos se calculó el indicador. */
   aves?: number | null;
   lote?: string;
+  /** De dónde salió ese número de aves: las que anotó el operario o la ficha del galpón; y de qué día. */
+  aves_origen?: 'anotadas' | 'ficha';
+  aves_fecha?: string;
+  /** Qué quedó fuera de lo lógico, en palabras, para el supervisor. */
+  avisos?: string[];
   /** El reloj del teléfono estaba más atrás que la última hora conocida (segundos). Señal de reloj cambiado a mano. */
   reloj_atras_s?: number;
   // Lo siguiente lo pone el servidor al recibir.
@@ -168,6 +191,8 @@ export interface DispositivoInfo {
   creado?: string;
   /** Falso mientras ningún supervisor haya dicho que conoce este equipo. */
   reconocido?: boolean;
+  /** El supervisor lo desvinculó. Puede volver a permitirlo. */
+  revocado?: boolean;
 }
 
 export interface ItemCola {

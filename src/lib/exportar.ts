@@ -53,7 +53,7 @@ export function armarCsv(config: Config, registros: RegistroLocal[], revisiones:
       decimal(r.lat, 5),
       decimal(r.lng, 5),
       r.demora_s ?? '',
-      flagsDe(r).map((f) => NOMBRE_FLAG[f]).join(', '),
+      [...flagsDe(r).filter((f) => f !== 'ilogico' || !r.avisos?.length).map((f) => NOMBRE_FLAG[f]), ...(r.avisos ?? [])].join('; '),
       v ? (persona.get(v.usuario_id) ?? '') : '',
       v?.nota ?? '',
       r.fotos.map((f) => urlFoto(config.granja.id, f.id)).join(' '),

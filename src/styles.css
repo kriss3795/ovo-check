@@ -1600,3 +1600,10 @@ table.datos td.falta {
   font-size: 22px;
   padding: 0 8px;
 }
+
+/* Detalle para el supervisor: lo que quedó fuera de lo lógico y el cálculo de cada número */
+.avisos-logicos { margin: 0; padding-left: 20px; color: var(--mal); font-weight: 650; font-size: 15px; display: grid; gap: 4px; }
+.calculo { border-top: 1px solid var(--linea, #d9dfdc); padding-top: 10px; display: grid; gap: 3px; }
+.calculo p { font-variant-numeric: tabular-nums; }
+.etiqueta.manana { background: #fff5d1; color: #6f5200; }
+.etiqueta.tarde { background: #e4ebf6; color: #2c4670; }

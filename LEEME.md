@@ -88,6 +88,10 @@ La primera pantalla tiene dos botones: **Soy operario** y **Soy supervisor**.
 
 Para sumar operarios, el supervisor va a **Ajustes > Teléfonos > Enviar invitación**: se abre WhatsApp con el enlace y el nombre del plantel. La clave del plantel no va en el mensaje; se la da él.
 
+**Teléfono de la empresa que cambia de operario.** No se desvincula. En ese teléfono se toca **Cambiar de persona** y el operario nuevo elige su nombre y crea su PIN. Si todavía no está en la lista, toca **No estoy en la lista** y un supervisor lo autoriza ahí mismo con su clave (la clave no queda guardada en el teléfono). Si esa persona ya existía y estaba de baja o con licencia, vuelve a quedar activa con su historial.
+
+**Si un teléfono fue desvinculado,** hay dos formas de volver a usarlo: el supervisor toca **Volver a permitir** en Ajustes > Teléfonos (el teléfono se activa solo en un minuto, sin escribir nada), o en el teléfono se toca **Entrar con la clave del plantel** (el nombre del plantel ya viene puesto).
+
 Si el supervisor quiere una prueba de que el operario estuvo en cada galpón, puede agregar la tarea **Foto al entrar al galpón** desde la biblioteca de tareas: queda con hora, ubicación y nombre.
 
 ---
@@ -98,7 +102,7 @@ Si el supervisor quiere una prueba de que el operario estuvo en cada galpón, pu
 2. La pantalla de inicio le muestra los pasos: agregar a los operarios, anotar las aves de cada galpón y sus encargados, revisar las tareas y sumar los teléfonos.
 3. Cada operario entra desde su teléfono como se explica arriba.
 
-Las tareas clásicas de postura vienen cargadas: temperatura mínima y máxima, lectura del medidor de agua, mortalidad, bebederos, comederos, pediluvio, huevos recolectados, alimento, nidos, y pesaje semanal. El supervisor puede editarlas, pausarlas, borrarlas, reordenarlas o agregar otras (hay una biblioteca con las más frecuentes). Solo el supervisor crea y elimina galpones, personas, supervisores y tareas.
+Las tareas clásicas de postura vienen cargadas: temperatura mínima y máxima, lectura del medidor de agua, mortalidad, bebederos, comederos, pediluvio, huevos recolectados, alimento, nidos, y pesaje semanal. El supervisor puede editarlas, pausarlas, borrarlas, reordenarlas o agregar otras. Al abrir una tarea, lo primero después del nombre es si se hace **en la mañana o en la tarde**, y la lista de tareas lo muestra en cada una. Para agregar hay 37 tareas frecuentes ordenadas por tema (aves, agua, alimento, huevos, ambiente, bioseguridad e instalaciones): humedad, pH y temperatura del agua, peso del huevo, peso y uniformidad de las aves, huevos de piso, recepción de alimento, vacunación, registro de visitas, generador, alarmas y otras. Solo el supervisor crea y elimina galpones, personas, supervisores y tareas.
 
 ---
 
@@ -109,7 +113,8 @@ Las tareas clásicas de postura vienen cargadas: temperatura mínima y máxima, 
 **Supervisor.**
 - **Hoy, por galpón:** avance, alertas y atrasos de cada galpón, y el detalle de cada tarea con su foto.
 - **Hoy, por persona:** cuántas tareas lleva cada operario en los galpones a su cargo, cuáles le faltan y cuáles están atrasadas, y todo lo que registró.
-- **Alertas:** problemas informados, lecturas de medidor menores que la anterior y aves vivas que no calzan con la mortalidad, para marcarlas como revisadas.
+- **Alertas:** problemas informados, lecturas de medidor menores que la anterior, aves vivas que no calzan con la mortalidad y mediciones fuera de lo lógico, para marcarlas como revisadas.
+- **Cómo se calculó:** al abrir cualquier registro con un indicador se ve la cuenta completa, por ejemplo "91,2 % de postura = 10.032 huevos ÷ 11.000 aves × 100", la resta de lecturas del medidor, la relación agua/alimento del día, y de dónde salió el número de aves.
 - **Historial:** cualquier día anterior, y un resumen por tarea (fechas por galpón) con los indicadores calculados: consumo del día, ml por ave, g por ave, % de postura.
 - **Descargar datos:** todos los registros en un archivo que abre en Excel.
 - **Descargar fotos:** un archivo .zip con las fotos, ordenadas por día y galpón.
@@ -190,9 +195,10 @@ Límite conocido: el PIN del operario es de 4 números y se comprueba en el tel�
 - **Atrasar el reloj no sirve.** La app recuerda la última hora que vio: si alguien cambia el reloj del teléfono hacia atrás sin señal, el registro no queda "más temprano" y llega marcado para verificar.
 - **Ubicación.** Cada registro lleva la posición del teléfono. Si el supervisor guarda la ubicación del galpón, lo registrado a más de 300 m queda marcado. El GPS de un teléfono no distingue dos galpones que están uno al lado del otro; para eso sirve la foto de la puerta.
 - **Nada se edita ni se borra.** Una corrección crea una versión nueva firmada y con motivo; la anterior queda a la vista. El supervisor puede corregir o anular, y también queda firmado; lo anulado sigue a la vista con su motivo.
-- **Cada registro guarda las aves y el lote de ese día,** así los indicadores antiguos no cambian cuando el supervisor actualiza el galpón.
+- **Los indicadores usan las aves vivas que anota el operario.** Mientras no haya ninguna anotada se usa la ficha del galpón. Cada registro guarda con cuántas aves se calculó y de dónde salió ese número, así los indicadores antiguos no cambian después.
 - **El operario no recibe pistas.** No ve rangos, lecturas anteriores ni cálculos, así que no puede ajustar un número para que "calce". El supervisor compara contra sus propios criterios.
 - **Aves vivas y mortalidad.** En la tarea Mortalidad el operario cuenta las aves muertas y después anota las aves vivas que quedan. La app no calcula ni corrige nada: compara con las aves vivas anotadas la vez anterior menos las muertas de hoy y, si no calza, le llega una alerta al supervisor con la diferencia, para que pregunte. El operario no ve el número anterior ni la alerta. En planteles creados antes de este cambio se activa en Ajustes > Tareas > Mortalidad > **Pedir también las aves vivas**.
+- **Mediciones fuera de lo lógico.** En Ajustes > **Alertas de mediciones** el supervisor ve y ajusta los límites de cada dato. La app trae límites amplios para detectar errores y cosas raras, no metas productivas: temperatura entre -5 y 45 °C, agua entre 100 y 500 ml por ave, alimento entre 60 y 160 g por ave, postura sobre 100 %, mortalidad sobre 0,3 % del lote en un día, relación agua/alimento entre 1,2 y 3,5 L por kg, y cambio de más de 30 % de un día a otro en el consumo de agua o de alimento. También avisa siempre si la mínima es mayor que la máxima. La alerta llega con el número y la explicación. El operario no ve los límites ni recibe ningún aviso, y puede guardar igual.
 - **Marcas para verificar.** Tarea de la tarde registrada en la mañana, registro lejos del galpón, tarea sin la foto pedida, tarea no realizada, reloj desajustado.
 - **Nunca bloquea al operario.** Lo dudoso se guarda igual y se marca para que el supervisor lo revise.
 
@@ -259,7 +265,7 @@ Si la base de datos gratuita de Supabase se pasa de su límite, Supabase la deja
 - **No lee los números de las fotos.** La planilla de pesaje llega como foto.
 - **Un teléfono trabaja con un plantel a la vez.**
 - **Si un teléfono se rompe antes de enviar,** se pierde lo que tenía pendiente.
-- **No calcula las aves por su cuenta.** El operario anota cada día las aves muertas y las aves vivas; la app solo compara y avisa si no calza. El número de aves de la ficha de cada galpón, del que dependen el % de postura y los consumos por ave, lo actualiza el supervisor en Ajustes > Galpones.
+- **No calcula las aves por su cuenta.** El operario anota cada día las aves muertas y las aves vivas; la app solo compara y avisa si no calza. Si en un plantel no se piden las aves vivas, los indicadores usan el número de la ficha del galpón, que actualiza el supervisor en Ajustes > Galpones.
 
 ---
 

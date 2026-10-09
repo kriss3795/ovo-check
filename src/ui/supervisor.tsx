@@ -8,7 +8,7 @@ import { avisar, cambiarRuta, ir, useEstado } from '../lib/estado';
 import { armarCsv, entregarArchivo } from '../lib/exportar';
 import { anotarBajada, descargarFotos, fotosDe, fotosPorVencer, nombreFoto } from '../lib/fotos';
 import {
-  FLAGS_CRITICOS, Indice, NOMBRE_BLOQUE, NOMBRE_FLAG, avanceGalpon, conjuntoRevisadas, cuadreAves, decimalesIndicador, esCritico, esDudoso,
+  FLAGS_CRITICOS, Indice, NOMBRE_BLOQUE, NOMBRE_FLAG, avanceGalpon, comoSeCalculo, conjuntoRevisadas, cuadreAves, decimalesIndicador, esCritico, esDudoso,
   evaluarCampo, flagsDe, indicadoresTexto, momento, relojMalo, resumen, tareasDe, vigenteEn,
 } from '../lib/logica';
 import { mensajeError } from '../lib/nube';
@@ -761,6 +761,23 @@ function HistorialDia({ config, fecha }: { config: Config; fecha: string }) {
   );
 }
 
+/** Para el supervisor: de dónde sale cada número calculado, para que lo pueda comprobar. */
+function ComoSeCalculo({ reg, galpon }: { reg: RegistroLocal; galpon: Galpon | undefined }) {
+  const indice = useIndice();
+  const lineas = comoSeCalculo(indice, reg, galpon);
+  if (!lineas.length) return null;
+  return (
+    <div className="calculo">
+      <p className="chico fuerte">Cómo se calculó</p>
+      {lineas.map((l, k) => (
+        <p key={k} className="chico">
+          {mayuscula(l)}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 /** Para el supervisor: si las aves vivas anotadas calzan con las de la vez anterior menos las muertas de este registro. */
 function CuadreAves({ reg }: { reg: RegistroLocal }) {
   const indice = useIndice();
@@ -850,8 +867,8 @@ function ResumenTarea() {
         </div>
       </div>
       <p className="suave chico">
-        Valores en {unidad}
-. Toca un valor para ver su respaldo. La raya indica que ese día no hubo registro.
+        Valores en {unidad}. Toca un valor para ver su respaldo y cómo se calculó. La raya indica que ese día no hubo registro.
+        {conIndicador && ' Los valores por ave usan las últimas aves vivas anotadas o, si no hay, las de la ficha del galpón.'}
       </p>
       {carga.estado === 'cargando' && <p className="suave centro">Cargando…</p>}
       {carga.estado === 'error' && <div className="tarjeta aviso-atencion">No se pudo cargar el período. {carga.error}</div>}
@@ -1202,6 +1219,14 @@ export function RegistroDetalle({ id }: { id: string }) {
                 );
               })}
               {esSup && <CuadreAves reg={reg} />}
+              {esSup && (reg.avisos?.length ?? 0) > 0 && (
+                <ul className="avisos-logicos">
+                  {reg.avisos!.map((a, k) => (
+                    <li key={k}>{a}.</li>
+                  ))}
+                </ul>
+              )}
+              {esSup && <ComoSeCalculo reg={reg} galpon={galpon} />}
             </div>
           )}
           {flags.length > 0 && (

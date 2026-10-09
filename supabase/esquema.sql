@@ -554,6 +554,60 @@ begin
     'temporal', coalesce((u ->> 'temporal')::boolean, false));
 end $$;
 
+-- Un operario nuevo se suma desde el mismo teléfono del plantel, con la clave de un supervisor que lo autoriza.
+-- Sirve para el teléfono de la empresa que pasa de una persona a otra: no hay que desvincular nada.
+-- Si esa persona ya existía con licencia o de baja, vuelve a quedar activa y crea un PIN nuevo.
+create or replace function oc_autorizar_operario(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  d oc_dispositivos; g oc_granjas; u jsonb; ya jsonb; id_nuevo text; llave text;
+  n text := regexp_replace(trim(coalesce(p ->> 'nombre', '')), '\s+', ' ', 'g');
+begin
+  d := oc__dispositivo(p ->> 'token');
+  if d.fallos >= 8 and d.fallo_ultimo > now() - interval '10 minutes' then
+    return jsonb_build_object('error', 'OC_BLOQUEO');
+  end if;
+  select * into g from oc_granjas where id = d.granja_id for update;
+  llave := 'login:' || g.id || ':' || coalesce(p ->> 'supervisor_id', '');
+  if oc__frenado(llave, 20) then
+    return jsonb_build_object('error', 'OC_BLOQUEO');
+  end if;
+  select x into u from jsonb_array_elements(g.config -> 'usuarios') x
+    where x ->> 'id' = p ->> 'supervisor_id' and (x ->> 'activo')::boolean and x ->> 'rol' = 'supervisor';
+  if u is null or length(coalesce(u ->> 'pin_hash', '')) <> 64
+     or u ->> 'pin_hash' <> oc__hash(u ->> 'id', coalesce(p ->> 'clave', '')) then
+    perform oc__anotar(llave);
+    update oc_dispositivos set
+      fallos = case when fallo_ultimo > now() - interval '10 minutes' then fallos + 1 else 1 end,
+      fallo_ultimo = now() where id = d.id;
+    return jsonb_build_object('error', 'OC_CLAVE');
+  end if;
+  update oc_dispositivos set fallos = 0 where id = d.id;
+  if length(n) < 3 or length(n) > 50 then
+    raise exception 'OC_DATOS';
+  end if;
+  select x into ya from jsonb_array_elements(g.config -> 'usuarios') x where lower(x ->> 'nombre') = lower(n) limit 1;
+  if ya is not null then
+    if ya ->> 'rol' <> 'operario' or (ya ->> 'activo')::boolean then
+      return jsonb_build_object('error', 'OC_PERSONA_EXISTE');
+    end if;
+    id_nuevo := ya ->> 'id';
+    update oc_granjas set config = oc__cambiar_usuario(config, id_nuevo,
+        jsonb_build_object('activo', true, 'estado', 'activo', 'pin_hash', '')), version = version + 1
+      where id = g.id returning * into g;
+  else
+    if jsonb_array_length(g.config -> 'usuarios') >= 300 then
+      raise exception 'OC_DATOS';
+    end if;
+    id_nuevo := gen_random_uuid()::text;
+    update oc_granjas set config = jsonb_set(config, '{usuarios}', (config -> 'usuarios') || jsonb_build_object(
+        'id', id_nuevo, 'nombre', n, 'rol', 'operario', 'pin_hash', '', 'activo', true, 'estado', 'activo')), version = version + 1
+      where id = g.id returning * into g;
+  end if;
+  return jsonb_build_object('usuario_id', id_nuevo, 'version', g.version, 'config', oc__config_para(g, false),
+    'autorizo', u ->> 'nombre');
+end $$;
+
 -- Al cerrar sesión, la sesión de supervisor deja de existir también en el servidor.
 create or replace function oc_salir(p jsonb) returns jsonb
 language plpgsql security definer set search_path = public, pg_temp as $$
@@ -849,7 +903,7 @@ begin
     insert into oc_registros (id, granja_id, dispositivo_id, fecha, galpon_id, datos, capturado, reloj_desfase_s, demora_s, critico)
       values ((r ->> 'id')::uuid, d.granja_id, d.id, (r ->> 'fecha')::date, r ->> 'galpon_id', r,
               cap, desfase, round(ms / 1000)::int,
-              coalesce(jsonb_typeof(r -> 'flags') = 'array' and (r -> 'flags') ?| array['problema', 'retrocede', 'no_calza'], false)
+              coalesce(jsonb_typeof(r -> 'flags') = 'array' and (r -> 'flags') ?| array['problema', 'retrocede', 'no_calza', 'ilogico'], false)
                 and not coalesce((r ->> 'anulado')::boolean, false))
       on conflict (id) do nothing;
     select * into fila from oc_registros where id = (r ->> 'id')::uuid and granja_id = d.granja_id;
@@ -888,9 +942,10 @@ begin
   if sup is not null then
     res := res || jsonb_build_object(
       'dispositivos', (select coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'nombre', x.nombre, 'visto', x.visto,
-          'pendientes', x.pendientes, 'usuario_id', x.usuario_id, 'creado', x.creado, 'reconocido', x.reconocido)
+          'pendientes', x.pendientes, 'usuario_id', x.usuario_id, 'creado', x.creado, 'reconocido', x.reconocido,
+          'revocado', x.revocado)
           order by x.visto desc nulls last), '[]'::jsonb)
-        from oc_dispositivos x where x.granja_id = g.id and not x.revocado),
+        from oc_dispositivos x where x.granja_id = g.id and (not x.revocado or x.visto > now() - interval '90 days')),
       'intentos_fallidos', (select count(*)::int from oc_intentos i
         where i.llave = 'unirse:' || g.nombre_norm and i.creado > now() - interval '1 day'),
       'clave_operarios', g.clave_operarios,
@@ -947,6 +1002,11 @@ begin
       where granja_id = d.granja_id and id = (p ->> 'dispositivo_id')::uuid and id <> d.id;
     delete from oc_sesiones where granja_id = d.granja_id and dispositivo_id = (p ->> 'dispositivo_id')::uuid and dispositivo_id <> d.id;
     delete from oc_suscripciones where granja_id = d.granja_id and dispositivo_id = (p ->> 'dispositivo_id')::uuid and dispositivo_id <> d.id;
+    return jsonb_build_object('ok', true);
+  elsif p ->> 'accion' = 'permitir' then
+    -- Deshace una desvinculación: el mismo teléfono vuelve a funcionar sin escribir nada en él.
+    update oc_dispositivos set revocado = false, reconocido = true, avisado = true, fallos = 0
+      where granja_id = d.granja_id and id = (p ->> 'dispositivo_id')::uuid;
     return jsonb_build_object('ok', true);
   elsif p ->> 'accion' = 'reconocer' then
     update oc_dispositivos set reconocido = true, avisado = true
@@ -1052,7 +1112,7 @@ begin
   from (select granja_id, jsonb_agg(jsonb_build_object(
           'id', datos ->> 'id', 'tipo', datos ->> 'tipo', 'galpon', datos ->> 'galpon_nombre', 'persona', datos ->> 'usuario_nombre',
           'usuario_id', datos ->> 'usuario_id', 'tarea', datos -> 'tarea' ->> 'nombre', 'categoria', datos ->> 'categoria',
-          'nota', datos ->> 'nota', 'flags', datos -> 'flags') order by recibido) as regs
+          'nota', datos ->> 'nota', 'flags', datos -> 'flags', 'avisos', datos -> 'avisos') order by recibido) as regs
         from tomados group by granja_id) t
   join oc_granjas g on g.id = t.granja_id;
   return res;
@@ -1353,7 +1413,7 @@ begin
            where n.nspname = 'public' and p.proname like 'oc\_%' loop
     execute format('revoke execute on function %s from public, anon, authenticated', f.firma);
     if f.proname in ('oc_crear_granja', 'oc_buscar_granja', 'oc_unirse', 'oc_entrar_supervisor', 'oc_recuperar_correo', 'oc_login', 'oc_crear_pin', 'oc_cambiar_clave', 'oc_recuperar',
-                     'oc_guardar_config', 'oc_registrar', 'oc_sync', 'oc_registros', 'oc_revisar', 'oc_salir', 'oc_permitir_prueba',
+                     'oc_guardar_config', 'oc_registrar', 'oc_sync', 'oc_registros', 'oc_revisar', 'oc_salir', 'oc_permitir_prueba', 'oc_autorizar_operario',
                      'oc_admin', 'oc_cupo_ok', 'oc_suscribir', 'oc_desuscribir') then
       execute format('grant execute on function %s to anon, authenticated', f.firma);
     end if;

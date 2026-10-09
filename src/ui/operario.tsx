@@ -5,7 +5,7 @@ import {
 import { abrirVisita, ahora, guardarRegistro, salir, visitaVigente, type FotoNueva } from '../lib/app';
 import { avisar, cerrarPantalla, ir, leerEstado, useEstado, volver } from '../lib/estado';
 import {
-  HORA_INICIO_TARDE, Indice, LIMITE_BLOQUE, NOMBRE_BLOQUE, avanceGalpon, conjuntoRevisadas, cuadreAves, evaluarCampo, resumen, tareasDe,
+  HORA_INICIO_TARDE, Indice, LIMITE_BLOQUE, NOMBRE_BLOQUE, avanceGalpon, avesPara, avisosLogicos, conjuntoRevisadas, cuadreAves, evaluarCampo, resumen, tareasDe,
 } from '../lib/logica';
 import { CATEGORIAS_PROBLEMA, MOTIVOS_CORREGIR, MOTIVOS_OMITIR } from '../lib/plantillas';
 import type { Flag, Galpon, Registro, Tarea } from '../lib/tipos';
@@ -94,7 +94,7 @@ export function OpInicio({ embebido }: { embebido?: boolean }) {
         {galpones.length === 0 && <div className="tarjeta suave">No hay galpones en producción. El supervisor los activa en Ajustes.</div>}
         <div className="pila">
           {galpones.map((g, k) => {
-            const a = avanceGalpon(config, indice, revisadas, g.id, hoy, ahora(), hoy);
+            const a = avanceGalpon(config, indice, revisadas, g.id, hoy, ahora(), hoy, usuario.rol !== 'supervisor');
             return (
               <Fragment key={g.id}>
               {mios.length > 0 && mios.length < galpones.length && (k === 0 || k === mios.length) && (
@@ -402,8 +402,10 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
   const valores = tarea.campos.map((_, i) => aNumero(textos[i] ?? ''));
   const previo = indice.anterior(fecha, galpon.id, tarea.id);
   // El cálculo se guarda para el supervisor; al operario no se le muestra ningún valor de referencia.
+  // Las aves con que se calculan los indicadores son las últimas aves vivas anotadas; si no hay, las de la ficha.
+  const usadas = avesPara(indice, galpon, fecha, tarea.campos, valores);
   const evaluar = (i: number) =>
-    evaluarCampo(tarea.campos[i], valores[i], galpon, previo && previo.valores[i] != null ? { valor: previo.valores[i]!, fecha: previo.fecha } : null, fecha);
+    evaluarCampo(tarea.campos[i], valores[i], { ...galpon, aves: usadas.aves }, previo && previo.valores[i] != null ? { valor: previo.valores[i]!, fecha: previo.fecha } : null, fecha);
   const fotosTomadas = fotos.filter((f): f is FotoNueva => Boolean(f));
   const marca = (i: number) => () => lineasMarca(galpon.nombre, tarea.nombre, tarea.fotoEtiquetas[i] ?? 'Foto', usuario.nombre, regId, galpon.id);
 
@@ -443,7 +445,9 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
       categoria: null,
       nota: nota.trim(),
       fotos: omitida || anulado ? [] : sinFotosNuevas ? (original?.fotos ?? []) : fotosFinales.map((f) => ({ id: f.id, etiqueta: f.etiqueta })),
-      aves: galpon.aves ?? null,
+      aves: usadas.aves,
+      aves_origen: usadas.origen,
+      ...(usadas.fecha ? { aves_fecha: usadas.fecha } : {}),
       lote: galpon.lote ?? '',
       ...pres,
       flags,
@@ -454,6 +458,12 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
       motivo,
       ...extra,
     };
+    // Mediciones fuera de lo lógico: se anotan para el supervisor. Al operario no se le avisa ni se le impide guardar.
+    const avisos = conValores ? avisosLogicos({ config, indice, registro: reg, evs }) : [];
+    if (avisos.length) {
+      reg.avisos = avisos;
+      reg.flags = [...reg.flags, 'ilogico'];
+    }
     try {
       await guardarRegistro(reg, omitida || anulado || sinFotosNuevas ? [] : fotosFinales);
     } catch (e) {

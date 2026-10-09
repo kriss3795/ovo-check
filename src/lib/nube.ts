@@ -133,6 +133,7 @@ const MENSAJES: Record<string, string> = {
   OC_CORREO_CLAVE: 'El correo o la clave no coinciden.',
   OC_SIN_CUENTA: 'No hay ningún supervisor registrado con ese correo.',
   OC_CUPO_GRANJAS: 'Por ahora no quedan cupos para planteles nuevos. Inténtalo más adelante.',
+  OC_PERSONA_EXISTE: 'Ya hay una persona activa con ese nombre. Búscala en la lista.',
   OC_CUPO_HOY: 'Hoy ya se crearon muchos planteles nuevos. Inténtalo mañana.',
   OC_LLENO: 'El servidor está lleno. Lo que anotes queda guardado en este teléfono y se enviará solo cuando haya espacio.',
   OC_TOPE_DIA: 'El plantel llegó al máximo de registros por día. Lo pendiente se enviará solo en unas horas.',

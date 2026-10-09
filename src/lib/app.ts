@@ -5,7 +5,7 @@ import { avisarProblema, conectarSesion, iniciarAvisos, refrescarAvisos, soltarA
 import { avisar, iniciarNavegacion, irRaiz, leerEstado, poner, ponerSync, type Visita } from './estado';
 import { FLAGS_CRITICOS } from './logica';
 import { RUTINA_CLASICA, tareaDesde } from './plantillas';
-import type { Config, FotoLocal, ItemCola, Registro, RegistroLocal, Revision, Usuario } from './tipos';
+import type { Config, DispositivoInfo, FotoLocal, ItemCola, Registro, RegistroLocal, Revision, Usuario } from './tipos';
 import { fechaLocal, hashPin, sumarDias, uid, vibrar } from './util';
 
 // ------------------------------------------------------------------ memoria local
@@ -198,6 +198,11 @@ function latido() {
   subirReloj();
   revisarSesion();
   if (document.visibilityState !== 'visible' || !e.dispositivo) return;
+  // Un teléfono desvinculado pregunta cada minuto si el supervisor lo volvió a permitir.
+  if (e.fase === 'desvinculado') {
+    if (e.tic % 3 === 0) comprobarVinculo();
+    return;
+  }
   const hace = Date.now() - (e.sync.ultima ?? 0);
   const esSup = e.usuario?.rol === 'supervisor';
   const frenado = Date.now() < frenoHasta;
@@ -463,7 +468,7 @@ export function salir(olvidar = false) {
       }),
     };
     idb.guardar('kv', { config, version: e.version }, 'config');
-    poner({ config, dispositivos: [], fotosNube: null, servidorLleno: false, clavePlantel: null, intentosFallidos: 0 });
+    poner({ config, dispositivos: [], desvinculados: [], fotosNube: null, servidorLleno: false, clavePlantel: null, intentosFallidos: 0 });
   }
   idb.borrar('kv', 'sesion');
   poner({ usuario: null, fase: leerEstado().config ? 'ingreso' : 'bienvenida', ruta: [], cambiarClave: false });
@@ -471,6 +476,37 @@ export function salir(olvidar = false) {
 
 function marcarDesvinculado() {
   poner({ fase: 'desvinculado', desvinculado: true, usuario: null, ruta: [] });
+}
+
+/** ¿El supervisor volvió a permitir este teléfono? Si es así, queda listo para entrar, sin escribir nada. */
+export async function comprobarVinculo(): Promise<boolean> {
+  const e = leerEstado();
+  if (!e.dispositivo || e.fase !== 'desvinculado' || !navigator.onLine) return false;
+  try {
+    await rpc('oc_sync', { token: e.dispositivo.token, version: e.version || null, cursor: new Date().toISOString(), pendientes: cola.length });
+  } catch {
+    return false;
+  }
+  poner({ fase: 'ingreso', desvinculado: false });
+  avisar('El supervisor volvió a permitir este teléfono', 'ok');
+  sincronizar();
+  return true;
+}
+
+/**
+ * Suma un operario nuevo desde este mismo teléfono, con la clave de un supervisor que lo autoriza.
+ * No abre sesión de supervisor ni deja su clave guardada aquí.
+ */
+export async function autorizarOperario(nombre: string, supervisor: Usuario, clave: string): Promise<string> {
+  const e = leerEstado();
+  try {
+    const r = await rpc('oc_autorizar_operario', { token: e.dispositivo!.token, supervisor_id: supervisor.id, clave, nombre });
+    await ponerConfig(r.config, r.version);
+    return r.usuario_id as string;
+  } catch (err) {
+    if (err instanceof ErrorNube && err.codigo === 'OC_TOKEN') marcarDesvinculado();
+    throw err;
+  }
 }
 
 async function ponerConfig(config: Config, version: number) {
@@ -605,18 +641,25 @@ function manejarErrorSesion(err: unknown) {
   }
 }
 
-export async function administrar(accion: 'desvincular' | 'clave_operarios' | 'reconocer' | 'eliminar_plantel', valor?: string) {
+export async function administrar(accion: 'desvincular' | 'permitir' | 'clave_operarios' | 'reconocer' | 'eliminar_plantel', valor?: string) {
   const e = leerEstado();
   try {
     const r = await rpc('oc_admin', {
       token: e.dispositivo!.token,
       sesion: sesionDe(e.usuario),
       accion,
-      dispositivo_id: accion === 'desvincular' || accion === 'reconocer' ? valor : undefined,
+      dispositivo_id: accion === 'desvincular' || accion === 'permitir' || accion === 'reconocer' ? valor : undefined,
       clave: accion === 'clave_operarios' || accion === 'eliminar_plantel' ? valor : undefined,
     });
     if (r.config) await ponerConfig(r.config, r.version);
-    if (accion === 'desvincular') poner({ dispositivos: e.dispositivos.filter((d) => d.id !== valor) });
+    if (accion === 'desvincular') {
+      const d = e.dispositivos.find((x) => x.id === valor);
+      poner({ dispositivos: e.dispositivos.filter((x) => x.id !== valor), desvinculados: d ? [{ ...d, revocado: true }, ...e.desvinculados] : e.desvinculados });
+    }
+    if (accion === 'permitir') {
+      const d = e.desvinculados.find((x) => x.id === valor);
+      poner({ desvinculados: e.desvinculados.filter((x) => x.id !== valor), dispositivos: d ? [...e.dispositivos, { ...d, revocado: false, reconocido: true }] : e.dispositivos });
+    }
     if (accion === 'clave_operarios') poner({ clavePlantel: r.clave_operarios ?? valor ?? null });
     if (accion === 'reconocer') poner({ dispositivos: leerEstado().dispositivos.map((d) => (!valor || d.id === valor ? { ...d, reconocido: true } : d)) });
     if (accion === 'eliminar_plantel') await olvidarPlantel();
@@ -635,7 +678,7 @@ async function olvidarPlantel() {
   pines = {};
   cursor = { cursor: null, desde: '' };
   contarCola();
-  poner({ config: null, dispositivo: null, usuario: null, registros: [], revisiones: [], visitas: {}, dispositivos: [], fotosNube: null, servidorLleno: false, clavePlantel: null, intentosFallidos: 0, desvinculado: false, ruta: [], cambiarClave: false, fase: 'bienvenida' });
+  poner({ config: null, dispositivo: null, usuario: null, registros: [], revisiones: [], visitas: {}, dispositivos: [], desvinculados: [], fotosNube: null, servidorLleno: false, clavePlantel: null, intentosFallidos: 0, desvinculado: false, ruta: [], cambiarClave: false, fase: 'bienvenida' });
 }
 
 /** Trae del servidor los registros de un período (historial y exportación). */
@@ -892,7 +935,7 @@ async function traer(token: string) {
     for (const v of revs) mapa.set(v.id, v);
     poner({ revisiones: [...mapa.values()] });
   }
-  if (r.dispositivos) poner({ dispositivos: r.dispositivos, fotosNube: r.fotos ?? null, clavePlantel: r.clave_operarios ?? null, intentosFallidos: r.intentos_fallidos ?? 0 });
+  if (r.dispositivos) poner({ dispositivos: (r.dispositivos as DispositivoInfo[]).filter((d) => !d.revocado), desvinculados: (r.dispositivos as DispositivoInfo[]).filter((d) => d.revocado), fotosNube: r.fotos ?? null, clavePlantel: r.clave_operarios ?? null, intentosFallidos: r.intentos_fallidos ?? 0 });
   // Un supervisor sin sesión vigente en el servidor (venció, o entró sin conexión) vuelve a identificarse apenas hay señal.
   if (e.usuario?.rol === 'supervisor' && r.sesion_ok === false) {
     throw new ErrorNube('OC_SESION');

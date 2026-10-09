@@ -1,13 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   ArrowDown, ArrowUp, Bell, Check, ChevronRight, ClipboardList, Database, Images, KeyRound, LogOut, MapPin, Plus,
-  Send, Settings2, Smartphone, Trash2, Users, Warehouse, Wifi, X,
+  Send, Settings2, Smartphone, Trash2, TriangleAlert, Users, Warehouse, Wifi, X,
 } from 'lucide-react';
 import { administrar, ahora, diagnostico, guardarConfig, salir } from '../lib/app';
 import { avisar, ir, useEstado, volver } from '../lib/estado';
-import { anotarPausa, cargaDiaria, NOMBRE_BLOQUE } from '../lib/logica';
+import { anotarPausa, cargaDiaria, limitesDe, logicaDe, NOMBRE_BLOQUE, unidadResultado } from '../lib/logica';
 import { mensajeError } from '../lib/nube';
-import { BIBLIOTECA, RUTINA_CLASICA, campoAvesVivas, campoVacio, tareaDesde, tareaVacia } from '../lib/plantillas';
+import { BIBLIOTECA, GRUPOS_TAREAS, RUTINA_CLASICA, campoAvesVivas, campoVacio, tareaDesde, tareaVacia } from '../lib/plantillas';
 import type { Campo, Config, Galpon, Tarea, Usuario } from '../lib/tipos';
 import { DIAS_CORTOS, claveDebil, fechaLocal, haceCuanto, hashPin, iniciales, nombreDia, num, uid } from '../lib/util';
 import { Barra, Confirmar, Hoja, ICONOS, IconoTarea, Interruptor, aNumero } from './base';
@@ -74,6 +74,7 @@ export function Ajustes() {
       <div className="lista">
         {fila(<ClipboardList size={24} />, 'Tareas', `${config.tareas.filter((t) => t.activo).length} activas, cerca de ${carga.minutos} min de registro por galpón`, () => ir({ p: 'ajuste', cual: 'tareas' }))}
         {fila(<Warehouse size={24} />, 'Galpones', `${config.galpones.filter((g) => g.activo).length} en producción`, () => ir({ p: 'ajuste', cual: 'galpones' }))}
+        {fila(<TriangleAlert size={24} />, 'Alertas de mediciones', 'Límites lógicos de cada dato. Solo los ves tú', () => ir({ p: 'ajuste', cual: 'logica' }))}
         {fila(<Users size={24} />, 'Personas', `${operarios} ${operarios === 1 ? 'operario' : 'operarios'}`, () => ir({ p: 'ajuste', cual: 'personas' }))}
       </div>
       <p className="seccion">Teléfonos</p>
@@ -112,6 +113,8 @@ export function AjustePantalla(p: { cual: string; id?: string }) {
       return <EditorGalpon id={p.id!} />;
     case 'personas':
       return <Personas />;
+    case 'logica':
+      return <AlertasLogicas />;
     case 'telefonos':
       return <Telefonos />;
     case 'granja':
@@ -174,7 +177,10 @@ function Tareas() {
                     {t.nombre}
                   </span>
                   <span className="fila-detalle" style={{ display: 'block' }}>
-                    {[describirTipo(t), NOMBRE_BLOQUE[t.bloque].toLowerCase(), describirDias(t.dias).toLowerCase(), t.galpones ? `${t.galpones.length} ${t.galpones.length === 1 ? 'galpón' : 'galpones'}` : ''].filter(Boolean).join(', ')}
+                    {[describirTipo(t), describirDias(t.dias).toLowerCase(), t.galpones ? `${t.galpones.length} ${t.galpones.length === 1 ? 'galpón' : 'galpones'}` : ''].filter(Boolean).join(', ')}
+                  </span>
+                  <span className={`etiqueta ${t.bloque === 'tarde' ? 'tarde' : 'manana'}`} style={{ marginTop: 4, marginRight: 6 }}>
+                    {NOMBRE_BLOQUE[t.bloque]}
                   </span>
                   {!t.activo && <span className="etiqueta" style={{ marginTop: 4 }}>En pausa</span>}
                 </span>
@@ -210,8 +216,16 @@ function Tareas() {
               <p className="seccion" style={{ margin: '4px 2px 0' }}>
                 O elige una frecuente
               </p>
-              <div className="lista">
-                {disponibles.map((b) => (
+              {[...GRUPOS_TAREAS, { titulo: 'Otras', nombres: disponibles.filter((b) => !GRUPOS_TAREAS.some((g) => g.nombres.includes(b.nombre))).map((b) => b.nombre) }]
+                .map((g) => ({ titulo: g.titulo, tareas: g.nombres.map((n) => disponibles.find((b) => b.nombre === n)).filter((b): b is (typeof disponibles)[number] => Boolean(b)) }))
+                .filter((g) => g.tareas.length > 0)
+                .map((g) => (
+                  <div key={g.titulo} className="pila" style={{ gap: 6 }}>
+                    <p className="chico fuerte suave" style={{ margin: '6px 2px 0' }}>
+                      {g.titulo}
+                    </p>
+                    <div className="lista">
+                      {g.tareas.map((b) => (
                   <button
                     key={b.nombre}
                     className="fila compacta"
@@ -228,13 +242,15 @@ function Tareas() {
                         {b.nombre}
                       </span>
                       <span className="fila-detalle" style={{ display: 'block' }}>
-                        {describirDias(b.dias)}
+                        {NOMBRE_BLOQUE[b.bloque]}, {describirDias(b.dias).toLowerCase()}
                       </span>
                     </span>
                     <Plus className="flecha" aria-hidden />
                   </button>
+                      ))}
+                    </div>
+                  </div>
                 ))}
-              </div>
             </>
           )}
         </Hoja>
@@ -359,6 +375,26 @@ function EditorTarea({ id }: { id: string }) {
           <input className="entrada" value={t.nombre} onChange={(e) => set({ nombre: e.target.value })} maxLength={50} placeholder="Por ejemplo: Lectura del medidor de agua" />
         </label>
         <div className="campo">
+          <span className="rotulo">¿En la mañana o en la tarde?</span>
+          <div className="segmentos">
+            <button type="button" aria-pressed={t.bloque === 'manana'} onClick={() => set({ bloque: 'manana' })}>
+              En la mañana
+            </button>
+            <button type="button" aria-pressed={t.bloque === 'tarde'} onClick={() => set({ bloque: 'tarde' })}>
+              En la tarde
+            </button>
+          </div>
+          <div className="opciones" style={{ marginTop: 8 }}>
+            {[1, 2, 3, 4, 5, 6, 0].map((d) => (
+              <button key={d} type="button" className="opcion cuadrada" aria-pressed={t.dias.includes(d)} aria-label={nombreDia(d)} onClick={() => set({ dias: t.dias.includes(d) ? t.dias.filter((x) => x !== d) : [...t.dias, d] })}>
+                {DIAS_CORTOS[d]}
+              </button>
+            ))}
+          </div>
+          <small>{t.dias.length ? describirDias(t.dias) : 'Elige al menos un día'}. Pasadas las 13:00 (mañana) o las 20:00 (tarde) lo pendiente se marca como atrasado.</small>
+        </div>
+
+        <div className="campo">
           <span className="rotulo">Qué registra el operario</span>
           <div className="segmentos">
             {(
@@ -472,26 +508,6 @@ function EditorTarea({ id }: { id: string }) {
               </small>
             </div>
           )}
-        </div>
-
-        <div className="campo">
-          <span className="rotulo">Cuándo</span>
-          <div className="segmentos">
-            <button type="button" aria-pressed={t.bloque === 'manana'} onClick={() => set({ bloque: 'manana' })}>
-              En la mañana
-            </button>
-            <button type="button" aria-pressed={t.bloque === 'tarde'} onClick={() => set({ bloque: 'tarde' })}>
-              En la tarde
-            </button>
-          </div>
-          <div className="opciones" style={{ marginTop: 8 }}>
-            {[1, 2, 3, 4, 5, 6, 0].map((d) => (
-              <button key={d} type="button" className="opcion cuadrada" aria-pressed={t.dias.includes(d)} aria-label={nombreDia(d)} onClick={() => set({ dias: t.dias.includes(d) ? t.dias.filter((x) => x !== d) : [...t.dias, d] })}>
-                {DIAS_CORTOS[d]}
-              </button>
-            ))}
-          </div>
-          <small>{t.dias.length ? describirDias(t.dias) : 'Elige al menos un día'}. Pasadas las 13:00 (mañana) o las 20:00 (tarde) lo pendiente se marca como atrasado.</small>
         </div>
 
         <div className="tarjeta pila">
@@ -638,7 +654,7 @@ function EditorGalpon({ id }: { id: string }) {
         <label className="campo">
           <span>Aves alojadas hoy</span>
           <input className="entrada" inputMode="numeric" value={aves} onChange={(e) => setAves(e.target.value.replace(/[^\d.]/g, ''))} placeholder="Por ejemplo: 12000" />
-          <small>Con este número se calculan el consumo por ave, el porcentaje de postura y la mortalidad. Actualízalo cuando cambie.</small>
+          <small>Con este número se calculan el consumo por ave, el porcentaje de postura y la mortalidad mientras el operario no anote las aves vivas. Desde que las anota en la tarea Mortalidad, se usan las anotadas.</small>
         </label>
         <label className="campo">
           <span>Lote (opcional)</span>
@@ -780,7 +796,21 @@ function HojaPersonaNueva({ cerrar }: { cerrar: () => void }) {
   const enviar = async () => {
     const n = nombre.trim().replace(/\s+/g, ' ');
     if (n.length < 3) return setError('Escribe nombre y apellido');
-    if (config.usuarios.some((u) => u.nombre.toLowerCase() === n.toLowerCase())) return setError('Ya existe una persona con ese nombre');
+    const ya = config.usuarios.find((u) => u.nombre.toLowerCase() === n.toLowerCase());
+    if (ya && ya.activo) return setError(`${ya.nombre} ya está en la lista y está activo`);
+    if (ya && ya.rol !== rol) return setError(`${ya.nombre} ya existe como ${ya.rol} (${ESTADOS[ya.estado].toLowerCase()}). Ábrelo en la lista para volver a activarlo`);
+    if (ya) {
+      // Alguien que estaba con licencia o de baja y vuelve: no se crea de nuevo, se reactiva con su historial.
+      const hecho = await guardar((c) => {
+        const x = c.usuarios.find((u) => u.id === ya.id);
+        if (x) {
+          x.estado = 'activo';
+          x.activo = true;
+        }
+      }, `${ya.nombre} ya estaba en la lista: quedó activo de nuevo`);
+      if (hecho) cerrar();
+      return;
+    }
     if (rol === 'supervisor' && !correoValido(correo)) return setError('Escribe el correo del supervisor: con él entra y ahí le llega el código si olvida su clave');
     if (rol === 'supervisor' && config.usuarios.some((u) => u.rol === 'supervisor' && (u.correo ?? '').toLowerCase() === correo.trim().toLowerCase())) return setError('Otro supervisor de este plantel ya usa ese correo');
     if (rol === 'supervisor' && clave.length < 6) return setError('La clave temporal debe tener al menos 6 caracteres');
@@ -958,6 +988,122 @@ function HojaPersona({ u, esYo, cerrar }: { u: Usuario; esYo: boolean; cerrar: (
   );
 }
 
+// ------------------------------------------------------------------ alertas de mediciones
+const aLimite = (t: string): number | null => {
+  const x = t.trim().replace(',', '.');
+  if (x === '') return null;
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
+};
+const deLimite = (n: number | null) => (n === null ? '' : String(n).replace('.', ','));
+
+function AlertasLogicas() {
+  const config = useEstado((e) => e.config)!;
+  const { ocupado, guardar } = useGuardar();
+  const datos = config.tareas
+    .filter((t) => t.tipo === 'numero' || t.tipo === 'contador')
+    .flatMap((t) => t.campos.map((c, i) => ({ t, c, i })).filter((x) => !x.c.saldo));
+  const logica = logicaDe(config);
+  const [lim, setLim] = useState<Record<string, { min: string; max: string }>>(() =>
+    Object.fromEntries(datos.map(({ t, i }) => [`${t.id}|${i}`, { min: deLimite(limitesDe(t.campos, i).min), max: deLimite(limitesDe(t.campos, i).max) }])),
+  );
+  const [ratio, setRatio] = useState({ min: deLimite(logica.ratioMin), max: deLimite(logica.ratioMax) });
+  const [cambio, setCambio] = useState(deLimite(logica.cambioPct));
+  const [error, setError] = useState('');
+  const solo = (v: string) => v.replace(/[^\d.,-]/g, '').slice(0, 8);
+
+  const enviar = async () => {
+    for (const { t, c, i } of datos) {
+      const l = lim[`${t.id}|${i}`];
+      const a = aLimite(l.min);
+      const b = aLimite(l.max);
+      if (a !== null && b !== null && a > b) return setError(`En ${t.nombre}${t.campos.length > 1 ? `, ${c.etiqueta}` : ''} el mínimo es mayor que el máximo`);
+    }
+    setError('');
+    const ok = await guardar((cfg) => {
+      for (const t of cfg.tareas) {
+        t.campos.forEach((c, i) => {
+          const l = lim[`${t.id}|${i}`];
+          if (!l || c.saldo) return;
+          c.min = aLimite(l.min);
+          c.max = aLimite(l.max);
+        });
+      }
+      cfg.logica = { ratioMin: aLimite(ratio.min), ratioMax: aLimite(ratio.max), cambioPct: aLimite(cambio) };
+    }, 'Alertas guardadas');
+    if (ok) volver();
+  };
+
+  const par = (clave: string, v: { min: string; max: string }, poner: (x: { min: string; max: string }) => void, nombre: string) => (
+    <div className="linea-h" style={{ gap: 10 }}>
+      <label className="campo crece">
+        <span className="chico">Avisar bajo</span>
+        <input className="entrada" inputMode="decimal" value={v.min} onChange={(e) => poner({ ...v, min: solo(e.target.value) })} placeholder="Sin mínimo" aria-label={`${nombre}: avisar bajo`} id={`min-${clave}`} />
+      </label>
+      <label className="campo crece">
+        <span className="chico">Avisar sobre</span>
+        <input className="entrada" inputMode="decimal" value={v.max} onChange={(e) => poner({ ...v, max: solo(e.target.value) })} placeholder="Sin máximo" aria-label={`${nombre}: avisar sobre`} id={`max-${clave}`} />
+      </label>
+    </div>
+  );
+
+  return (
+    <div className="pantalla">
+      <Barra titulo="Alertas de mediciones" sub="Para detectar datos fuera de lo lógico" />
+      <div className="contenido">
+        <div className="tarjeta aviso-info">
+          <p className="chico">
+            Cuando un dato queda fuera de estos límites te llega una alerta, con el número y cómo se calculó, para que preguntes. Son límites amplios
+            para detectar errores y cosas raras, no tus metas productivas: ajústalos a tu plantel o déjalos en blanco.
+          </p>
+          <p className="chico fuerte" style={{ marginTop: 6 }}>El operario no ve estos límites ni recibe ningún aviso.</p>
+        </div>
+        {datos.length === 0 && <div className="tarjeta suave">No hay tareas con números. Agrégalas en Ajustes, Tareas.</div>}
+        {datos.map(({ t, c, i }) => {
+          const k = `${t.id}|${i}`;
+          const nombre = t.campos.filter((x) => !x.saldo).length > 1 ? `${t.nombre}: ${c.etiqueta}` : t.nombre;
+          return (
+            <section key={k} className="tarjeta pila" style={{ gap: 8 }}>
+              <div>
+                <p className="fuerte">{nombre}</p>
+                <p className="chico suave">En {unidadResultado(c) || 'el número anotado'}</p>
+              </div>
+              {par(k, lim[k], (x) => setLim({ ...lim, [k]: x }), nombre)}
+            </section>
+          );
+        })}
+        <section className="tarjeta pila" style={{ gap: 8 }}>
+          <div>
+            <p className="fuerte">Relación agua/alimento</p>
+            <p className="chico suave">Litros de agua por kilo de alimento del mismo día</p>
+          </div>
+          {par('ratio', ratio, setRatio, 'Relación agua/alimento')}
+        </section>
+        <section className="tarjeta pila" style={{ gap: 8 }}>
+          <div>
+            <p className="fuerte">Cambio brusco de un día a otro</p>
+            <p className="chico suave">En el consumo de agua y de alimento. Una caída del agua suele ser la primera señal de un problema.</p>
+          </div>
+          <label className="campo">
+            <span className="chico">Avisar si sube o baja más de (%)</span>
+            <input className="entrada" inputMode="decimal" value={cambio} onChange={(e) => setCambio(solo(e.target.value))} placeholder="Sin aviso" />
+          </label>
+        </section>
+        <div className="tarjeta suave chico">
+          Además, siempre se avisa cuando una lectura de medidor es menor que la anterior, cuando la temperatura mínima es mayor que la máxima y cuando
+          las aves vivas no calzan con la mortalidad.
+        </div>
+        {error && <p className="error-texto" role="alert">{error}</p>}
+      </div>
+      <div className="pie">
+        <button className="boton primario grande" disabled={ocupado} onClick={enviar}>
+          {ocupado ? 'Guardando…' : 'Guardar alertas'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ teléfonos
 function HojaClavePlantel({ actual, cerrar }: { actual: string; cerrar: () => void }) {
   const nombrePlantel = useEstado((e) => e.config?.granja.nombre ?? '');
@@ -997,6 +1143,7 @@ function HojaClavePlantel({ actual, cerrar }: { actual: string; cerrar: () => vo
 function Telefonos() {
   const config = useEstado((e) => e.config)!;
   const dispositivos = useEstado((e) => e.dispositivos);
+  const desvinculados = useEstado((e) => e.desvinculados);
   const propio = useEstado((e) => e.dispositivo?.id);
   const clave = useEstado((e) => e.clavePlantel);
   useEstado((e) => e.tic);
@@ -1009,6 +1156,17 @@ function Telefonos() {
       await administrar('desvincular', id);
       avisar('Teléfono desvinculado', 'ok');
       setQuitar(null);
+    } catch (e) {
+      avisar(mensajeError(e), 'mal');
+    } finally {
+      setOcupado(false);
+    }
+  };
+  const permitir = async (id: string) => {
+    setOcupado(true);
+    try {
+      await administrar('permitir', id);
+      avisar('Teléfono permitido de nuevo. Se activa solo en un minuto.', 'ok');
     } catch (e) {
       avisar(mensajeError(e), 'mal');
     } finally {
@@ -1083,11 +1241,43 @@ function Telefonos() {
             </div>
           ))}
         </div>
+        <div className="tarjeta aviso-info">
+          <p className="fuerte">Si un teléfono de la empresa cambia de operario</p>
+          <p className="chico">
+            No lo desvincules. En ese teléfono se toca <b>Cambiar de persona</b> (arriba a la derecha) y el operario nuevo elige su nombre y crea su PIN.
+            Si todavía no está en la lista, ahí mismo aparece <b>No estoy en la lista</b>: se agrega con la clave de un supervisor.
+          </p>
+        </div>
+        {desvinculados.length > 0 && (
+          <>
+            <p className="seccion">Desvinculados</p>
+            <div className="lista">
+              {desvinculados.map((x) => (
+                <div key={x.id} className="fila">
+                  <span className="medallon" style={{ opacity: 0.5 }}>
+                    <Smartphone size={24} />
+                  </span>
+                  <span className="fila-cuerpo">
+                    <span className="fila-titulo" style={{ display: 'block' }}>
+                      {persona(x.usuario_id) ?? (x.nombre || 'Teléfono')}
+                    </span>
+                    <span className="fila-detalle" style={{ display: 'block' }}>
+                      {[x.nombre, `última conexión ${haceCuanto(x.visto)}`].filter(Boolean).join(', ')}
+                    </span>
+                  </span>
+                  <button className="boton chico" disabled={ocupado} onClick={() => permitir(x.id)}>
+                    Volver a permitir
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
       {d && (
         <Confirmar
           titulo={`¿Desvincular ${persona(d.usuario_id) ? `el teléfono de ${persona(d.usuario_id)}` : 'este teléfono'}?`}
-          texto={`Deja de poder enviar y recibir datos del plantel de inmediato.${d.pendientes > 0 ? ` Tiene ${d.pendientes} registros sin enviar: se enviarán si vuelve a entrar.` : ''} Úsalo si el teléfono se perdió o si la persona ya no trabaja aquí. Si además quieres que no pueda volver a entrar, cambia la clave del plantel.`}
+          texto={`Deja de poder enviar y recibir datos del plantel de inmediato.${d.pendientes > 0 ? ` Tiene ${d.pendientes} registros sin enviar: se enviarán si vuelve a entrar.` : ''} Úsalo si el teléfono se perdió o si es el teléfono personal de alguien que ya no trabaja aquí. Después lo puedes volver a permitir desde esta misma pantalla. Si además quieres que no pueda volver a entrar con la clave, cambia la clave del plantel.`}
           accion="Desvincular"
           peligro
           ocupado={ocupado}

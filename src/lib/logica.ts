@@ -1,12 +1,12 @@
 // Reglas del día a día: qué tareas tocan, qué está hecho y qué se marca para el supervisor.
-import type { Campo, Config, Flag, Galpon, Pausa, Registro, RegistroLocal, Revision, Tarea } from './tipos';
-import { diaSemana, diasEntre, fechaLocal, num } from './util';
+import type { Campo, Config, Flag, Galpon, Logica, Pausa, Registro, RegistroLocal, Revision, Tarea } from './tipos';
+import { diaSemana, diasEntre, fechaCorta, fechaLocal, fechaRelativa, num } from './util';
 
 /** Hora límite de cada bloque: pasada esa hora, lo pendiente se muestra como atrasado. */
 export const LIMITE_BLOQUE = { manana: 13, tarde: 20 } as const;
 export const NOMBRE_BLOQUE = { manana: 'Mañana', tarde: 'Tarde' } as const;
 
-export const FLAGS_CRITICOS: Flag[] = ['problema', 'retrocede', 'no_calza'];
+export const FLAGS_CRITICOS: Flag[] = ['problema', 'retrocede', 'no_calza', 'ilogico'];
 export const FLAGS_CONFIANZA: Flag[] = ['lejos', 'sin_foto', 'omitida', 'temprano'];
 /** Antes de esta hora, una tarea de la tarde se considera registrada antes de tiempo. */
 export const HORA_INICIO_TARDE = 12;
@@ -15,6 +15,7 @@ export const NOMBRE_FLAG: Record<Flag | 'reloj', string> = {
   problema: 'Problema informado',
   retrocede: 'Lectura menor que la anterior',
   no_calza: 'Las aves vivas no calzan',
+  ilogico: 'Fuera de lo lógico',
   lejos: 'Lejos del galpón',
   sin_foto: 'Sin foto',
   omitida: 'No se hizo',
@@ -134,6 +135,27 @@ export class Indice {
     return this.reemplazo.get(r.id);
   }
 
+  /**
+   * Últimas aves vivas anotadas en un galpón, hasta ese día (o antes de ese día si `estricto`).
+   * Es el número que anotó el operario; la app no lo calcula.
+   */
+  avesAnotadas(fecha: string, galponId: string, estricto = false): { aves: number; fecha: string } | null {
+    let mejor: RegistroLocal | null = null;
+    let valor = 0;
+    for (const r of this.porClave.values()) {
+      if (r.omitida || r.galpon_id !== galponId) continue;
+      if (estricto ? r.fecha >= fecha : r.fecha > fecha) continue;
+      const i = r.tarea?.campos.findIndex((c) => c.saldo) ?? -1;
+      const v = i >= 0 ? r.valores[i] : null;
+      if (v == null || v <= 0) continue;
+      if (!mejor || r.fecha > mejor.fecha || (r.fecha === mejor.fecha && momento(r) > momento(mejor))) {
+        mejor = r;
+        valor = v;
+      }
+    }
+    return mejor ? { aves: valor, fecha: mejor.fecha } : null;
+  }
+
   /** Lectura anterior de una tarea (para medidores acumulativos). */
   anterior(fecha: string, galponId: string, tareaId: string): RegistroLocal | null {
     let mejor: RegistroLocal | null = null;
@@ -214,6 +236,222 @@ export function cuadreAves(campos: Campo[], valores: (number | null)[], previo: 
   return { i, antes, fechaAntes: previo.fecha, bajas, anotado, esperado, diferencia: anotado - esperado };
 }
 
+// ------------------------------------------------------------------ aves usadas en los cálculos
+export interface AvesUsadas {
+  aves: number | null;
+  origen: 'anotadas' | 'ficha';
+  fecha?: string;
+}
+
+/**
+ * Con cuántas aves se calculan los indicadores de un registro: las últimas aves vivas que anotó el operario y, si
+ * todavía no hay ninguna, las de la ficha del galpón. Para la mortalidad se usan las aves que había antes de contar.
+ */
+export function avesPara(indice: Indice, galpon: Galpon, fecha: string, campos: Campo[], valores: (number | null)[]): AvesUsadas {
+  const propio = campos.findIndex((c) => c.saldo);
+  if (propio >= 0) {
+    const antes = indice.avesAnotadas(fecha, galpon.id, true);
+    if (antes) return { aves: antes.aves, origen: 'anotadas', fecha: antes.fecha };
+    const vivas = valores[propio];
+    if (vivas != null && vivas > 0) return { aves: vivas + (valores[0] ?? 0), origen: 'anotadas', fecha };
+  } else {
+    const a = indice.avesAnotadas(fecha, galpon.id);
+    if (a) return { aves: a.aves, origen: 'anotadas', fecha: a.fecha };
+  }
+  return { aves: galpon.aves ?? null, origen: 'ficha' };
+}
+
+// ------------------------------------------------------------------ fuera de lo lógico
+export const LOGICA_DEFECTO: Logica = { ratioMin: 1.2, ratioMax: 3.5, cambioPct: 30 };
+export const logicaDe = (c: Config): Logica => ({ ...LOGICA_DEFECTO, ...(c.logica ?? {}) });
+
+export type Magnitud = 'agua' | 'alimento' | 'temperatura' | 'postura' | 'mortalidad' | null;
+
+/** Qué mide un dato, deducido de su unidad y su indicador. Sirve para sugerir límites y cruzar agua con alimento. */
+export function magnitud(campos: Campo[], i: number): Magnitud {
+  const c = campos[i];
+  if (!c || c.saldo) return null;
+  const u = c.unidad.trim().toLowerCase();
+  if (u.includes('°')) return 'temperatura';
+  if (c.calculo === 'por_ave' && /^(l|lt|lts|litros?)$/.test(u)) return 'agua';
+  if (c.calculo === 'por_ave' && /^(kg|kgs|kilos?)$/.test(u)) return 'alimento';
+  if (c.calculo === 'pct' && /postura/i.test(c.indicador)) return 'postura';
+  if (c.calculo === 'pct' && /^aves?$/.test(u) && i === 0) return 'mortalidad';
+  return null;
+}
+
+/** Límites amplios que sugiere la app: marcan lo imposible o muy raro, no la meta productiva. */
+const LIMITES_SUGERIDOS: Record<Exclude<Magnitud, null>, { min: number | null; max: number | null }> = {
+  temperatura: { min: -5, max: 45 },
+  agua: { min: 100, max: 500 }, // ml por ave al día
+  alimento: { min: 60, max: 160 }, // g por ave al día
+  postura: { min: null, max: 100 }, // %
+  mortalidad: { min: null, max: 0.3 }, // % del lote en un día
+};
+
+export function limitesDe(campos: Campo[], i: number): { min: number | null; max: number | null; sugeridos: boolean } {
+  const c = campos[i];
+  if (c.min !== undefined || c.max !== undefined) return { min: c.min ?? null, max: c.max ?? null, sugeridos: false };
+  const m = magnitud(campos, i);
+  return m ? { ...LIMITES_SUGERIDOS[m], sugeridos: true } : { min: null, max: null, sugeridos: true };
+}
+
+/** En qué se expresa el resultado que ve el supervisor para un dato. */
+export const unidadResultado = (c: Campo) => (c.calculo !== 'valor' ? c.indicador : c.acumulativo ? `${c.unidad} al día` : c.unidad);
+const decRes = (c: Campo, x: number) => (c.calculo !== 'valor' ? decimalesIndicador(c, x) : c.acumulativo ? Math.max(c.decimales, 0) : c.decimales);
+/** Un límite tal como lo escribió el supervisor: sin ceros de relleno. */
+const limite = (n: number) => String(Math.round(n * 100) / 100).replace('.', ',');
+const nombreDato = (nombreTarea: string, campos: Campo[], i: number) => (campos.filter((c) => !c.saldo).length > 1 ? campos[i].etiqueta : nombreTarea);
+
+/** Número del día (no el del medidor): el consumo si es acumulativo, o lo anotado. */
+export function baseDe(indice: Indice, r: Registro, i: number): number | null {
+  const c = r.tarea?.campos[i];
+  const v = r.valores[i];
+  if (!c || v == null || r.omitida) return null;
+  if (!c.acumulativo) return v;
+  const prev = indice.anterior(r.fecha, r.galpon_id, r.tarea_id ?? '');
+  const pv = prev?.valores[i];
+  if (!prev || pv == null || v < pv) return null;
+  return (v - pv) / Math.max(1, diasEntre(prev.fecha, r.fecha));
+}
+
+/** Agua (L) y alimento (kg) del día en un galpón, si ya están los dos. */
+export function aguaYAlimento(indice: Indice, fecha: string, galponId: string, actual?: Registro): { agua: number; alimento: number; relacion: number } | null {
+  let agua: number | null = null;
+  let alimento: number | null = null;
+  const regs = indice.delDia(fecha, galponId).filter((r) => !actual || r.tarea_id !== actual.tarea_id);
+  if (actual) regs.push(actual as RegistroLocal);
+  for (const r of regs) {
+    r.tarea?.campos.forEach((_, i) => {
+      const m = magnitud(r.tarea!.campos, i);
+      if (m !== 'agua' && m !== 'alimento') return;
+      const b = baseDe(indice, r, i);
+      if (b == null) return;
+      if (m === 'agua') agua = b;
+      else alimento = b;
+    });
+  }
+  if (agua == null || alimento == null || alimento <= 0) return null;
+  return { agua, alimento, relacion: agua / alimento };
+}
+
+/**
+ * Revisa un registro recién anotado contra lo lógico y devuelve, en palabras, lo que no cuadra.
+ * Es solo para el supervisor: al operario no se le muestra nada ni se le impide guardar.
+ */
+export function avisosLogicos(p: { config: Config; indice: Indice; registro: Registro; evs: Evaluacion[] }): string[] {
+  const r = p.registro;
+  const campos = r.tarea?.campos ?? [];
+  const nombre = r.tarea?.nombre ?? '';
+  const out: string[] = [];
+  if (!campos.length || r.omitida || r.anulado) return out;
+  const logica = logicaDe(p.config);
+
+  campos.forEach((c, i) => {
+    if (c.saldo) return;
+    const ev = p.evs[i];
+    const x = c.calculo !== 'valor' ? ev?.indicador : ev?.base;
+    if (x == null) return;
+    const { min, max } = limitesDe(campos, i);
+    const texto = `${nombreDato(nombre, campos, i)}: ${num(x, decRes(c, x))} ${unidadResultado(c)}`;
+    if (min != null && x < min) out.push(`${texto}, bajo el mínimo lógico (${limite(min)})`);
+    else if (max != null && x > max) out.push(`${texto}, sobre el máximo lógico (${limite(max)})`);
+  });
+
+  // Termómetro de mínima y máxima: la mínima no puede ser mayor que la máxima.
+  const iMin = campos.findIndex((c, i) => magnitud(campos, i) === 'temperatura' && /m[ií]n/i.test(c.etiqueta));
+  const iMax = campos.findIndex((c, i) => magnitud(campos, i) === 'temperatura' && /m[aá]x/i.test(c.etiqueta));
+  const tMin = r.valores[iMin];
+  const tMax = r.valores[iMax];
+  if (iMin >= 0 && iMax >= 0 && tMin != null && tMax != null && tMin > tMax) {
+    out.push(`La mínima (${num(tMin, campos[iMin].decimales)} ${campos[iMin].unidad}) es mayor que la máxima (${num(tMax, campos[iMax].decimales)} ${campos[iMax].unidad})`);
+  }
+
+  campos.forEach((c, i) => {
+    const m = magnitud(campos, i);
+    if (m !== 'agua' && m !== 'alimento') return;
+    const hoy = p.evs[i]?.base;
+    // Cambio brusco respecto del registro anterior (hasta tres días atrás).
+    const prev = p.indice.anterior(r.fecha, r.galpon_id, r.tarea_id ?? '');
+    const antes = prev && diasEntre(prev.fecha, r.fecha) <= 3 ? baseDe(p.indice, prev, i) : null;
+    if (logica.cambioPct != null && hoy != null && antes != null && antes > 0) {
+      const cambio = ((hoy - antes) / antes) * 100;
+      if (Math.abs(cambio) >= logica.cambioPct) {
+        const u = c.acumulativo ? `${c.unidad} al día` : c.unidad;
+        out.push(`${nombreDato(nombre, campos, i)}: ${cambio < 0 ? 'bajó' : 'subió'} ${num(Math.abs(cambio))} % respecto del registro anterior (de ${num(antes, c.decimales)} a ${num(hoy, c.decimales)} ${u})`);
+      }
+    }
+  });
+
+  // Relación entre el agua y el alimento del mismo día.
+  if (campos.some((_, i) => ['agua', 'alimento'].includes(magnitud(campos, i) ?? ''))) {
+    const aa = aguaYAlimento(p.indice, r.fecha, r.galpon_id, r);
+    if (aa && ((logica.ratioMin != null && aa.relacion < logica.ratioMin) || (logica.ratioMax != null && aa.relacion > logica.ratioMax))) {
+      out.push(`Relación agua/alimento: ${limite(aa.relacion)} L por kg, fuera de lo lógico (${logica.ratioMin != null ? limite(logica.ratioMin) : '0'} a ${logica.ratioMax != null ? limite(logica.ratioMax) : 'sin tope'})`);
+    }
+  }
+  return out;
+}
+
+/** Cómo se llegó a cada número calculado de un registro, paso a paso, para que el supervisor lo pueda comprobar. */
+export function comoSeCalculo(indice: Indice, r: Registro, galpon: Galpon | undefined): string[] {
+  const campos = r.tarea?.campos ?? [];
+  const out: string[] = [];
+  if (!campos.length || r.omitida || r.anulado) return out;
+  const aves = r.aves !== undefined ? r.aves : (galpon?.aves ?? null);
+  let usaAves = false;
+  campos.forEach((c, i) => {
+    const v = r.valores[i];
+    if (v == null || c.saldo) return;
+    const etiqueta = campos.filter((x) => !x.saldo).length > 1 ? `${c.etiqueta}: ` : '';
+    let base: number | null = v;
+    if (c.acumulativo) {
+      const prev = indice.anterior(r.fecha, r.galpon_id, r.tarea_id ?? '');
+      const pv = prev?.valores[i];
+      if (!prev || pv == null) {
+        out.push(`${etiqueta}es la primera lectura: el consumo se calcula desde la siguiente.`);
+        return;
+      }
+      if (v < pv) {
+        out.push(`${etiqueta}no se calcula el consumo, porque la lectura (${num(v, c.decimales)}) es menor que la anterior (${num(pv, c.decimales)}, ${fechaRelativa(prev.fecha).toLowerCase()}).`);
+        return;
+      }
+      const dias = Math.max(1, diasEntre(prev.fecha, r.fecha));
+      base = (v - pv) / dias;
+      out.push(
+        `${etiqueta}consumo = ${num(v, c.decimales)} − ${num(pv, c.decimales)} (lectura del ${fechaCorta(prev.fecha)})` +
+          (dias > 1 ? ` = ${num(v - pv, c.decimales)} ${c.unidad} ÷ ${dias} días` : '') +
+          ` = ${num(base, c.decimales)} ${c.unidad} al día`,
+      );
+    }
+    if (c.calculo === 'valor') return;
+    usaAves = true;
+    if (!aves) {
+      out.push(`${etiqueta}no se calculó ${c.indicador}: falta el número de aves del galpón.`);
+      return;
+    }
+    const x = c.calculo === 'por_ave' ? (base * 1000) / aves : (base * 100) / aves;
+    const u = c.acumulativo ? `${c.unidad} al día` : c.unidad;
+    out.push(
+      c.calculo === 'por_ave'
+        ? `${etiqueta}${num(x, decimalesIndicador(c, x))} ${c.indicador} = ${num(base, c.decimales)} ${u} × 1.000 ÷ ${num(aves)} aves`
+        : `${etiqueta}${num(x, decimalesIndicador(c, x))} ${c.indicador} = ${num(base, c.decimales)} ${c.unidad} ÷ ${num(aves)} aves × 100`,
+    );
+  });
+  if (usaAves && aves) {
+    out.push(
+      r.aves_origen === 'anotadas'
+        ? `Aves usadas: ${num(aves)}, las aves vivas anotadas ${r.aves_fecha ? fechaRelativa(r.aves_fecha).toLowerCase() : ''}`.trim() + '.'
+        : `Aves usadas: ${num(aves)}, de la ficha del galpón (aún no hay aves vivas anotadas).`,
+    );
+  }
+  if (campos.some((_, i) => ['agua', 'alimento'].includes(magnitud(campos, i) ?? ''))) {
+    const aa = aguaYAlimento(indice, r.fecha, r.galpon_id, r);
+    if (aa) out.push(`Relación agua/alimento del día: ${limite(aa.relacion)} L por kg = ${num(aa.agua)} L ÷ ${num(aa.alimento)} kg`);
+  }
+  return out;
+}
+
 export const decimalesIndicador = (c: Campo, x: number) => (c.calculo === 'pct' ? (Math.abs(x) < 1 ? 2 : 1) : 0);
 
 /** Resumen corto de lo registrado, para listas. */
@@ -279,6 +517,8 @@ export function avanceGalpon(
   fecha: string,
   ahora: Date,
   hoy: string,
+  /** En la pantalla del operario solo cuentan como alerta los problemas que él mismo informó: nada que dé pistas. */
+  paraOperario = false,
 ): Avance {
   const tareas = tareasDe(config, galponId, fecha);
   const pendientes: Tarea[] = [];
@@ -289,8 +529,8 @@ export function avanceGalpon(
   let ultimo: RegistroLocal | null = null;
   const contar = (r: RegistroLocal) => {
     if (!revisadas.has(r.id)) {
-      if (esCritico(r)) alertas++;
-      else if (esDudoso(r)) dudas++;
+      if (paraOperario ? r.flags.includes('problema') : esCritico(r)) alertas++;
+      else if (!paraOperario && esDudoso(r)) dudas++;
     }
     if (!ultimo || momento(r) > momento(ultimo)) ultimo = r;
   };

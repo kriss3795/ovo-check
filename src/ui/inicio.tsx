@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, ChevronRight, ClipboardCheck, Eye, EyeOff, KeyRound, Mail, Minus, Plus, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, ChevronRight, ClipboardCheck, Eye, EyeOff, KeyRound, Mail, Minus, Plus, ShieldCheck, UserPlus } from 'lucide-react';
 import {
-  buscarPlantel, cambiarClave, crearGranja, crearPin, entrarOperario, entrarSupervisor, entrarSupervisorCorreo, pedirCodigo,
+  autorizarOperario, buscarPlantel, cambiarClave, comprobarVinculo, crearGranja, crearPin, entrarOperario, entrarSupervisor, entrarSupervisorCorreo, pedirCodigo,
   pedirCodigoCorreo, recuperarClave, recuperarClaveCorreo, salir, vincular,
 } from '../lib/app';
 import { avisar, leerEstado, poner, useEstado } from '../lib/estado';
 import { mensajeError } from '../lib/nube';
 import type { Usuario } from '../lib/tipos';
 import { claveDebil, iniciales, vibrar } from '../lib/util';
-import { Barra, Envio, PuntosPin, Teclado, useAtras } from './base';
+import { Barra, Envio, Hoja, PuntosPin, Teclado, useAtras } from './base';
 import { BotonInstalar } from './avisos';
 
 export const correoValido = (c: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(c.trim());
@@ -63,7 +63,12 @@ export function SinNube() {
 
 export function Bienvenida() {
   // Un enlace de invitación (…/?plantel=Nombre) trae el nombre del plantel ya escrito.
-  const invitado = new URLSearchParams(window.location.search).get('plantel')?.trim() ?? '';
+  // Un teléfono desvinculado que vuelve a entrar ya sabe a qué plantel pertenece: solo falta la clave.
+  const [sugerido] = useState(() => leerEstado().plantelSugerido ?? '');
+  useEffect(() => {
+    if (leerEstado().plantelSugerido) poner({ plantelSugerido: null });
+  }, []);
+  const invitado = sugerido || (new URLSearchParams(window.location.search).get('plantel')?.trim() ?? '');
   const [paso, setPaso] = useState<'inicio' | 'operario' | 'supervisor' | 'crear' | 'olvido'>(invitado ? 'operario' : 'inicio');
   const anterior = useEstado((e) => (e.config && e.dispositivo && !e.desvinculado ? e.config.granja.nombre : ''));
   if (paso === 'operario') return <EntrarPlantel volver={() => setPaso('inicio')} inicial={invitado} />;
@@ -521,6 +526,7 @@ export function Ingreso() {
   // Quien acaba de entrar al plantel como operario pasa directo a elegir su nombre.
   const [rol, setRol] = useState<'operario' | 'supervisor' | null>(() => leerEstado().rolIngreso);
   const [elegido, setElegido] = useState<Usuario | null>(null);
+  const [nuevo, setNuevo] = useState(false);
   useEffect(() => {
     if (leerEstado().rolIngreso) poner({ rolIngreso: null });
   }, []);
@@ -594,11 +600,71 @@ export function Ingreso() {
         {lista.length > 0 ? (
           <div className="lista">{lista.map(fila)}</div>
         ) : (
-          <div className="tarjeta suave">Aún no hay operarios en este plantel. El supervisor los agrega en Ajustes, Personas.</div>
+          <div className="tarjeta suave">{rol === 'operario' ? 'Aún no hay operarios en este plantel. Agrega el primero aquí mismo, con la clave del supervisor.' : 'No hay supervisores activos.'}</div>
         )}
-        {rol === 'operario' && lista.length > 0 && <p className="chico suave">Si no apareces, pide a tu supervisor que te agregue.</p>}
+        {rol === 'operario' && (
+          <button className="boton" onClick={() => setNuevo(true)}>
+            <UserPlus size={20} aria-hidden /> No estoy en la lista
+          </button>
+        )}
       </div>
+      {nuevo && <HojaOperarioNuevo supervisores={supervisores} cerrar={() => setNuevo(false)} />}
     </div>
+  );
+}
+
+/**
+ * El teléfono de la empresa pasa a una persona nueva: se agrega aquí mismo, con la clave de un supervisor.
+ * No hay que desvincular el teléfono ni usar otro equipo.
+ */
+function HojaOperarioNuevo({ supervisores, cerrar }: { supervisores: Usuario[]; cerrar: () => void }) {
+  const [nombre, setNombre] = useState('');
+  const [supId, setSupId] = useState(supervisores[0]?.id ?? '');
+  const [clave, setClave] = useState('');
+  const [error, setError] = useState('');
+  const [ocupado, setOcupado] = useState(false);
+  const enviar = async () => {
+    const n = nombre.trim().replace(/\s+/g, ' ');
+    const sup = supervisores.find((u) => u.id === supId);
+    if (n.length < 3) return setError('Escribe el nombre y el apellido del operario');
+    if (!sup) return setError('Elige al supervisor que autoriza');
+    if (!clave) return setError('Falta la clave del supervisor');
+    setError('');
+    setOcupado(true);
+    try {
+      await autorizarOperario(n, sup, clave);
+      avisar(`${n} ya está en la lista. Toca su nombre para crear su PIN.`, 'ok');
+      cerrar();
+    } catch (e) {
+      setError(mensajeError(e));
+      setOcupado(false);
+    }
+  };
+  return (
+    <Hoja titulo="Agregar operario" cerrar={cerrar}>
+      <p className="chico suave">Lo autoriza un supervisor con su clave. La clave no queda guardada en este teléfono.</p>
+      <label className="campo">
+        <span>Nombre y apellido del operario</span>
+        <input className="entrada" value={nombre} onChange={(e) => setNombre(e.target.value)} maxLength={50} autoComplete="off" autoFocus />
+      </label>
+      {supervisores.length > 1 && (
+        <label className="campo">
+          <span>Supervisor que autoriza</span>
+          <select className="entrada" value={supId} onChange={(e) => setSupId(e.target.value)}>
+            {supervisores.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.nombre}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <CampoClave rotulo={supervisores.length === 1 ? `Clave de ${supervisores[0].nombre} (supervisor)` : 'Clave del supervisor'} valor={clave} alCambiar={setClave} />
+      {error && <p className="error-texto" role="alert">{error}</p>}
+      <button className="boton primario grande" disabled={ocupado} onClick={enviar}>
+        {ocupado ? 'Agregando…' : 'Agregar operario'}
+      </button>
+    </Hoja>
   );
 }
 
@@ -895,20 +961,35 @@ export function CambiarClave({ obligatorio, alTerminar }: { obligatorio?: boolea
 
 export function Desvinculado() {
   const pendientes = useEstado((e) => e.sync.pendientes + e.sync.fotosPendientes);
+  const plantel = useEstado((e) => e.config?.granja.nombre ?? '');
+  const [ocupado, setOcupado] = useState(false);
+  const comprobar = async () => {
+    setOcupado(true);
+    const ok = await comprobarVinculo();
+    setOcupado(false);
+    if (!ok) avisar('Todavía no. El supervisor lo permite en Ajustes, Teléfonos.', 'info');
+  };
   return (
     <div className="pantalla blanca">
       <div className="contenido centrado portada">
         <img src="/marca.webp" alt="" width={96} height={96} />
         <h1 className="titulo">Este teléfono fue desvinculado</h1>
-        <p className="suave">El supervisor lo quitó del plantel. Para volver a usarlo hay que entrar de nuevo con la clave del plantel.</p>
+        <p className="suave">
+          Un supervisor lo quitó{plantel ? ` de ${plantel}` : ' del plantel'}. Lo guardado aquí no se borra. Hay dos formas de volver a usarlo:
+        </p>
         {pendientes > 0 && (
           <div className="tarjeta aviso-atencion">
-            Hay {pendientes} registros guardados en este teléfono que no alcanzaron a enviarse. Se enviarán al entrar de nuevo al
-            mismo plantel.
+            Hay {pendientes} registros guardados en este teléfono que no alcanzaron a enviarse. Se enviarán al volver a entrar.
           </div>
         )}
-        <button className="boton primario grande" onClick={() => poner({ fase: 'bienvenida' })}>
-          Entrar de nuevo
+        <button className="boton primario grande" onClick={() => poner({ fase: 'bienvenida', plantelSugerido: plantel || null })}>
+          Entrar con la clave del plantel
+        </button>
+        <p className="chico suave" style={{ maxWidth: 340 }}>
+          O el supervisor lo vuelve a permitir desde su equipo, en Ajustes, Teléfonos. Este teléfono se da cuenta solo en un minuto.
+        </p>
+        <button className="boton" disabled={ocupado} onClick={comprobar}>
+          {ocupado ? 'Comprobando…' : 'Ya lo permitió: comprobar ahora'}
         </button>
       </div>
     </div>

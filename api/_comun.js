@@ -79,6 +79,11 @@ export function textoDeRegistro(r) {
   if ((r.flags ?? []).includes('retrocede')) {
     return { titulo: `${lugar}: revisar ${r.tarea}`, texto: `La lectura es menor que la anterior. Registró ${r.persona}.` };
   }
+  if ((r.flags ?? []).includes('ilogico')) {
+    const avisos = Array.isArray(r.avisos) ? r.avisos : [];
+    const texto = avisos.length ? `${String(avisos[0]).slice(0, 150)}${avisos.length > 1 ? ` (y ${avisos.length - 1} más)` : ''}.` : 'Hay una medición fuera de lo lógico.';
+    return { titulo: `${lugar}: revisar ${r.tarea}`, texto: `${texto} Registró ${r.persona}.` };
+  }
   if ((r.flags ?? []).includes('no_calza')) {
     return { titulo: `${lugar}: revisar ${r.tarea}`, texto: `Las aves vivas anotadas no calzan con las del registro anterior. Registró ${r.persona}.` };
   }

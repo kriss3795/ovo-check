@@ -41,6 +41,8 @@ export interface Estado {
   registros: RegistroLocal[];
   revisiones: Revision[];
   dispositivos: DispositivoInfo[];
+  /** Equipos que un supervisor desvinculó en los últimos meses: se pueden volver a permitir. */
+  desvinculados: DispositivoInfo[];
   fotosNube: { usadas: number; max: number; dias: number; lleno?: boolean } | null;
   /** El servidor avisó que se quedó sin espacio para registros nuevos. */
   servidorLleno: boolean;
@@ -52,6 +54,8 @@ export interface Estado {
   desvinculado: boolean;
   /** Con qué rol abrir la pantalla de ingreso (justo después de entrar al plantel como operario). */
   rolIngreso: 'operario' | 'supervisor' | null;
+  /** Plantel que la pantalla de entrada trae ya escrito (el de este teléfono, si fue desvinculado). */
+  plantelSugerido: string | null;
   sync: Sync;
   visitas: Record<string, Visita>;
   ruta: Ruta[];
@@ -76,12 +80,14 @@ let estado: Estado = {
   registros: [],
   revisiones: [],
   dispositivos: [],
+  desvinculados: [],
   fotosNube: null,
   servidorLleno: false,
   clavePlantel: null,
   intentosFallidos: 0,
   desvinculado: false,
   rolIngreso: null,
+  plantelSugerido: null,
   sync: { enLinea: navigator.onLine, ocupado: false, pendientes: 0, fotosPendientes: 0, ultima: null, error: null, cupo: false, freno: null },
   visitas: {},
   ruta: [],
