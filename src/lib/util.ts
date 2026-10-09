@@ -27,10 +27,12 @@ export const normalizar = (t: string) =>
   t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
 /** Claves que cualquiera adivinaría: muy comunes, repetidas, en secuencia o iguales a un nombre conocido. */
 export function claveDebil(clave: string, ...nombres: string[]): boolean {
-  const c = normalizar(clave);
-  if (COMUNES.has(c) || /^(.)\1+$/.test(c)) return true;
-  if ('01234567890123456789'.includes(c) || '98765432109876543210'.includes(c) || 'abcdefghijklmnopqrstuvwxyz'.includes(c)) return true;
-  return nombres.some((n) => normalizar(n).length >= 3 && normalizar(n) === c);
+  // Se compara sin mayúsculas, tildes ni espacios, pero con sus símbolos: una clave hecha de símbolos no es fácil.
+  const c = clave.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s/g, '');
+  if (COMUNES.has(c)) return true;
+  if (c.length >= 3 && (/^(.)\1+$/.test(c) || '01234567890123456789'.includes(c) || '98765432109876543210'.includes(c) || 'abcdefghijklmnopqrstuvwxyz'.includes(c))) return true;
+  const n = normalizar(clave);
+  return nombres.some((x) => normalizar(x).length >= 3 && normalizar(x) === n);
 }
 
 const p2 = (n: number) => String(n).padStart(2, '0');
@@ -98,7 +100,8 @@ export function haceCuanto(iso: string | number | null | undefined): string {
   if (s < 60) return 'recién';
   if (s < 3600) return `hace ${Math.round(s / 60)} min`;
   if (s < 86400) return `hace ${Math.round(s / 3600)} h`;
-  return `hace ${Math.round(s / 86400)} días`;
+  const d = Math.round(s / 86400);
+  return d === 1 ? 'hace 1 día' : `hace ${d} días`;
 }
 
 export function duracion(seg: number): string {

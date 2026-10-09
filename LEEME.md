@@ -187,27 +187,64 @@ Límite conocido: el PIN del operario es de 4 números y se comprueba en el tel�
 
 - **Fotos solo desde la cámara de la app.** No hay acceso a la galería. Cada foto lleva quemados el galpón, la tarea, la fecha, la hora, el operario, el GPS y el código del registro.
 - **La hora la pone el servidor.** Si el teléfono estaba sin señal, el servidor calcula la hora real restando el tiempo que el registro esperó, y avisa si el reloj del teléfono estaba corrido.
+- **Atrasar el reloj no sirve.** La app recuerda la última hora que vio: si alguien cambia el reloj del teléfono hacia atrás sin señal, el registro no queda "más temprano" y llega marcado para verificar.
 - **Ubicación.** Cada registro lleva la posición del teléfono. Si el supervisor guarda la ubicación del galpón, lo registrado a más de 300 m queda marcado. El GPS de un teléfono no distingue dos galpones que están uno al lado del otro; para eso sirve la foto de la puerta.
-- **Nada se edita ni se borra.** Una corrección crea una versión nueva firmada y con motivo; la anterior queda a la vista. El supervisor puede corregir o anular, y también queda firmado.
+- **Nada se edita ni se borra.** Una corrección crea una versión nueva firmada y con motivo; la anterior queda a la vista. El supervisor puede corregir o anular, y también queda firmado; lo anulado sigue a la vista con su motivo.
+- **Cada registro guarda las aves y el lote de ese día,** así los indicadores antiguos no cambian cuando el supervisor actualiza el galpón.
 - **El operario no recibe pistas.** No ve rangos, lecturas anteriores ni cálculos, así que no puede ajustar un número para que "calce". El supervisor compara contra sus propios criterios.
 - **Marcas para verificar.** Tarea de la tarde registrada en la mañana, registro lejos del galpón, tarea sin la foto pedida, tarea no realizada, reloj desajustado.
 - **Nunca bloquea al operario.** Lo dudoso se guarda igual y se marca para que el supervisor lo revise.
 
 ---
 
-## Costos y límites del plan gratuito
+## Capacidad, costos y qué pasa si se llena
+
+### Para cuántos planteles alcanza gratis
+
+La medida que importa es el **galpón en producción**, no el plantel. Con la rutina clásica, cada galpón genera al día unos 10 registros (12 KB) y unas 4 fotos (130 KB cada una, que se borran a los 30 días).
+
+| Recurso de Supabase gratis | Lo que ocupa un galpón | Alcanza para |
+|---|---|---|
+| 1 GB para fotos | 16 MB, estable (las fotos rotan cada 30 días) | **unos 60 galpones al mismo tiempo** |
+| 500 MB para los números | 4,3 MB por año, y se acumula | 60 galpones durante 1 año y medio; 30 galpones durante 3 años |
+
+En planteles: **entre 12 y 15 avícolas de 4 galpones**, o 30 avícolas chicas de 2 galpones. Lo primero que se acaba es el espacio de fotos.
+
+### Qué pasa si se llena, y cómo se protege sola
+
+Si la base de datos gratuita de Supabase se pasa de su límite, Supabase la deja en modo solo lectura y nadie puede ni entrar. Para que eso no ocurra nunca, la app se mide a sí misma y frena antes, por etapas:
+
+1. **Cupo por galpones.** Un plantel nuevo solo se acepta si sus galpones caben junto a los que ya están trabajando (tope: 60 galpones en producción). A quien no cabe, la app le dice que por ahora no quedan cupos.
+2. **Pocos por día.** Se aceptan como máximo 8 planteles nuevos al día en todo el servidor, por si la app se hace conocida de golpe.
+3. **Al 70 % del espacio** (de números o de fotos) se dejan de aceptar planteles nuevos. Los que ya existen siguen igual.
+4. **Si se acaba el espacio de fotos,** los números siguen llegando y las fotos esperan en cada teléfono hasta que se libere espacio (todos los días se borran las que cumplen 30 días). Un solo plantel no puede ocupar más de 300 MB ni más de 3.000 fotos.
+5. **Si se acaba el espacio de números** (450 MB, antes del límite real de 500), los registros nuevos esperan en cada teléfono, sin perderse, y se envían solos cuando hay espacio. Entrar, revisar y descargar siguen funcionando. Operarios y supervisores ven el aviso "El servidor está lleno".
+6. **Contra el abuso:** un plantel no puede enviar más de 2.500 registros en 24 horas ni registros inflados, y un plantel creado para probar que quedó abandonado (ningún registro y ningún teléfono abierto en 60 días) se borra solo.
+
+**Aviso por correo.** La tarea diaria mide el espacio y envía un correo a la cuenta de Gmail de la app cuando el uso pasa el 60 %, el 80 % y el 95 %, con el detalle y qué hacer. Para recibirlo además en otro correo, agrega en Vercel la variable `CORREO_DUENO` con esa dirección.
+
+### Si se hace conocida y llega mucha gente
+
+- La app en sí (Vercel) aguanta sin problema: son archivos que se sirven desde una red mundial.
+- El servidor gratuito no se cae ni se corrompe: los cupos de arriba hacen que los primeros planteles sigan trabajando normal y los que llegan después reciban un "por ahora no quedan cupos".
+- Para abrir más cupos se pasa el proyecto de Supabase al plan **Pro (25 dólares al mes)**: 100 GB de fotos y 8 GB de números, con respaldo diario. No hay que mover nada ni reinstalar. Después se ejecuta una línea en el SQL Editor para que la app use el espacio nuevo:
+
+  ```sql
+  select oc_soporte_plan('pro');
+  ```
+
+  Con eso caben unos **1.500 galpones** (300 a 400 avícolas).
+
+### Otros límites
 
 | Servicio | Qué da gratis | Qué pasa al llegar al límite |
 |---|---|---|
-| Supabase | 500 MB de datos y 1 GB de fotos | No cobra: deja de aceptar fotos nuevas. Los números siguen llegando y las fotos esperan en cada teléfono |
 | Vercel | Publicación de la app, las funciones y las tareas diarias | Ver la nota de abajo |
 | Gmail | 500 correos al día | Sobra para recuperar claves |
 | Notificaciones | Sin costo ni límite práctico | |
 
-- Cada foto pesa como máximo 150 KB, así que 1 GB alcanza para unas 6.000 a 10.000 fotos.
-- Cada plantel tiene un tope de **3.000 fotos** guardadas. Con 30 días de plazo, un plantel de 10 galpones ocupa unas 1.500.
-- Cualquier persona que abra la dirección puede crear su plantel, sin pedirle nada a nadie. Para que el espacio gratuito no se agote, el servidor acepta hasta **100 planteles**; al llegar a ese número la app avisa que no se pueden crear más. Un plantel de prueba se borra en Ajustes > Plantel > Eliminar este plantel.
-- Los topes se cambian en la tabla `oc_ajustes` de Supabase (`max_granjas`, `dias_fotos`, `max_fotos_granja`, `max_mb_total`).
+- Los topes viven en la tabla `oc_ajustes` de Supabase (`max_galpones`, `max_granjas`, `max_granjas_dia`, `max_mb_datos`, `max_mb_total`, `max_mb_fotos_granja`, `max_fotos_granja`, `max_registros_dia`, `dias_fotos`).
+- Un plantel de prueba se borra en Ajustes > Plantel > Eliminar este plantel.
 - Supabase pausa los proyectos gratuitos tras 7 días sin uso. La tarea diaria de Vercel lo mantiene despierto.
 - El plan gratuito de Supabase no hace copias de respaldo. Conviene que cada supervisor use **Descargar datos** de vez en cuando.
 
@@ -221,11 +258,14 @@ Límite conocido: el PIN del operario es de 4 números y se comprueba en el tel�
 - **No lee los números de las fotos.** La planilla de pesaje llega como foto.
 - **Un teléfono trabaja con un plantel a la vez.**
 - **Si un teléfono se rompe antes de enviar,** se pierde lo que tenía pendiente.
+- **No descuenta sola la mortalidad.** El número de aves de cada galpón lo actualiza el supervisor en Ajustes > Galpones; de él dependen el % de postura y los consumos por ave.
 
 ---
 
 ## Soporte
 
 - Ver el uso de cada plantel, en el SQL Editor de Supabase: `select * from oc_soporte_uso;`
+- Borrar un plantel completo desde ahí (por ejemplo, uno creado para abusar del espacio): `select oc_soporte_eliminar('Nombre del plantel');`
+- Después de contratar el plan Pro de Supabase: `select oc_soporte_plan('pro');`
 - Si un supervisor único perdió su clave y ya no tiene acceso a su correo: `select oc_soporte_clave('Nombre del plantel', 'Nombre Apellido', 'claveTemporal');`
 - Para regenerar los íconos a partir de otro logo: reemplaza `recursos/logo-original.png` y ejecuta `python3 recursos/generar_iconos.py`.

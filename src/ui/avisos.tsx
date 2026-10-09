@@ -171,7 +171,7 @@ export function PaginaAvisos() {
           </p>
           <div className="pila chico">
             <p>
-              <b>Al supervisor, al instante:</b> cuando un operario informa un problema o marca "Hay un problema" en una revisión, y cuando una lectura de medidor es menor que la anterior.
+              <b>Al supervisor, al instante:</b> cuando un operario informa un problema o marca "Hay un problema" en una revisión, cuando una lectura de medidor es menor que la anterior, y cuando entra un equipo nuevo al plantel.
             </p>
             <p>
               <b>Al supervisor y a los encargados:</b> las tareas que siguen sin registrar, una vez después del mediodía (las de la mañana) y otra en la noche (las de la tarde).

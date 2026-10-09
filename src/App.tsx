@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { tocar } from './lib/app';
-import { useEstado } from './lib/estado';
+import { poner, useEstado } from './lib/estado';
 import { AjustePantalla } from './ui/ajustes';
 import { Aviso } from './ui/base';
 import { Bienvenida, CambiarClave, Desvinculado, Ingreso, SinNube } from './ui/inicio';
@@ -57,6 +57,22 @@ function Pantalla() {
   }
 }
 
+/** Aviso de versión nueva. Solo aparece en las pantallas principales, nunca en medio de un registro. */
+function VersionNueva() {
+  const hay = useEstado((e) => e.actualizacion);
+  const tranquilo = useEstado((e) => e.fase !== 'app' || e.ruta.length <= 1);
+  if (!hay || !tranquilo) return null;
+  return (
+    <div className="version-nueva" role="status">
+      <span>Hay una versión nueva de Ovo Check</span>
+      <button onClick={() => window.location.reload()}>Actualizar</button>
+      <button className="cerrar" onClick={() => poner({ actualizacion: false })} aria-label="Más tarde">
+        ×
+      </button>
+    </div>
+  );
+}
+
 export function App() {
   useEffect(() => {
     const f = () => tocar();
@@ -67,6 +83,7 @@ export function App() {
     <>
       <Pantalla />
       <Aviso />
+      <VersionNueva />
     </>
   );
 }

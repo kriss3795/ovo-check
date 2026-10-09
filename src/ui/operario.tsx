@@ -10,7 +10,7 @@ import {
 import { CATEGORIAS_PROBLEMA, MOTIVOS_CORREGIR, MOTIVOS_OMITIR } from '../lib/plantillas';
 import type { Flag, Galpon, Registro, Tarea } from '../lib/tipos';
 import { distancia, fechaHora, fechaLarga, fechaLocal, hora, mayuscula, num, uid } from '../lib/util';
-import { Barra, Confirmado, Envio, FotoBlob, Hoja, Huevo, IconoTarea, Teclado, aNumero, conMiles, useAtras } from './base';
+import { AvisoServidor, Barra, Confirmado, Envio, FotoBlob, Hoja, Huevo, IconoTarea, Teclado, aNumero, conMiles, useAtras } from './base';
 import { Camara } from './captura';
 import { TarjetaAvisos } from './avisos';
 import { activarAvisos, desactivarAvisos } from '../lib/avisos';
@@ -27,11 +27,23 @@ const TEXTO_ESTADO: Record<string, { texto: string; clase: string }> = {
   en_curso: { texto: 'En curso', clase: '' },
   sin_empezar: { texto: 'Sin empezar', clase: '' },
   sin_tareas: { texto: 'Sin tareas hoy', clase: '' },
+  // Días anteriores
+  incompleto: { texto: 'Incompleto', clase: 'atencion' },
+  sin_registros: { texto: 'Sin registros', clase: 'atencion' },
+  sin_tareas_dia: { texto: 'Sin tareas', clase: '' },
 };
 
 export function EtiquetaEstado({ estado }: { estado: string }) {
   const t = TEXTO_ESTADO[estado] ?? TEXTO_ESTADO.sin_empezar;
   return <span className={`etiqueta ${t.clase}`}>{t.texto}</span>;
+}
+
+/** Qué pasa con lo recién guardado: sale ahora, espera señal o espera espacio en el servidor. */
+function detalleEnvio(): string {
+  const { sync, servidorLleno } = leerEstado();
+  if (!sync.enLinea) return 'Se enviará cuando haya señal';
+  if (sync.freno || servidorLleno) return 'Guardado en este teléfono. Se enviará solo.';
+  return 'Enviando al supervisor';
 }
 
 // ------------------------------------------------------------------ inicio del operario
@@ -76,6 +88,7 @@ export function OpInicio({ embebido }: { embebido?: boolean }) {
       )}
       <div className="contenido">
         {!embebido && <h2 className="titulo">{mayuscula(fechaLarga(hoy))}</h2>}
+        {!embebido && <AvisoServidor />}
         {!embebido && <TarjetaAvisos />}
         {!embebido && galpones.length > 1 && <p className="suave">Toca el galpón donde estás. Puedes cambiar de galpón cuando quieras.</p>}
         {galpones.length === 0 && <div className="tarjeta suave">No hay galpones en producción. El supervisor los activa en Ajustes.</div>}
@@ -115,7 +128,7 @@ export function OpInicio({ embebido }: { embebido?: boolean }) {
       {menu && (
         <Hoja titulo={usuario.nombre} cerrar={() => setMenu(false)}>
           <p className="suave">Si otra persona va a usar este teléfono, sal para que entre con su propio PIN.</p>
-          <button className="boton primario" onClick={salir}>
+          <button className="boton primario" onClick={() => salir()}>
             <LogOut size={22} aria-hidden /> Salir
           </button>
           <button className="boton" onClick={() => setMenu(false)}>
@@ -309,7 +322,7 @@ type Paso =
   | { t: 'anular' };
 
 function lineasMarca(galpon: string, tarea: string, etiqueta: string, persona: string, id: string, galponId: string): string[] {
-  const v = leerEstado().visitas[galponId];
+  const v = visitaVigente(galponId);
   const gps = v?.lat != null ? `GPS ${v.lat.toFixed(5)}, ${v.lng!.toFixed(5)} (±${v.precision} m)` : 'Sin GPS';
   return [`${galpon} | ${tarea}`, `${fechaHora(ahora())} | ${persona}`, `${etiqueta} | ${gps} | Reg. ${id.slice(0, 8).toUpperCase()}`];
 }
@@ -335,6 +348,14 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
     if (original?.tarea) return { ...(actual ?? ({} as Tarea)), ...original.tarea, id: original.tarea_id!, foto: actual?.foto ?? 'opcional', fotoEtiquetas: actual?.fotoEtiquetas ?? ['Foto'], ayuda: actual?.ayuda ?? '' } as Tarea;
     return actual;
   }, [config, p.tarea, original]);
+  // El supervisor corrige un dato mirando el respaldo que ya existe: no se le piden fotos nuevas y el registro
+  // corregido conserva las fotos del original. (Una tarea que es solo de fotos sí se vuelve a fotografiar.)
+  const sinFotosNuevas = Boolean(original) && !p.anular && usuario.rol === 'supervisor' && original?.tarea?.tipo !== 'fotos';
+  // Al empezar se toma la ubicación de este momento (no la de cuando se abrió el galpón).
+  useEffect(() => {
+    if (!(original && usuario.rol === 'supervisor')) abrirVisita(p.galpon);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const fecha = original?.fecha ?? fechaLocal(ahora());
   const regId = useRef(uid()).current;
 
@@ -348,7 +369,7 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
     if (tarea.tipo === 'check') return { t: 'check' };
     if (tarea.tipo === 'contador') return { t: 'contador' };
     if (tarea.tipo === 'fotos') return { t: 'intro' };
-    return tarea.foto !== 'no' ? { t: 'foto', i: 0 } : { t: 'numero', i: 0 };
+    return tarea.foto !== 'no' && !sinFotosNuevas ? { t: 'foto', i: 0 } : { t: 'numero', i: 0 };
   };
 
   const [paso, setPaso] = useState<Paso>(inicial);
@@ -401,7 +422,7 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
     const estaOk = extra.ok !== undefined ? extra.ok : ok;
     if (estaOk === false) flags.push('problema');
     if (omitida) flags.push('omitida');
-    if (faltoFoto && !omitida && !anulado) flags.push('sin_foto');
+    if (faltoFoto && !omitida && !anulado && !sinFotosNuevas) flags.push('sin_foto');
     if (!original && !omitida && tarea.bloque === 'tarde' && ahora().getHours() < HORA_INICIO_TARDE) flags.push('temprano');
     const reg: Registro = {
       id: regId,
@@ -418,7 +439,9 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
       ok: tarea.tipo === 'check' && !omitida && !anulado ? estaOk : null,
       categoria: null,
       nota: nota.trim(),
-      fotos: omitida || anulado ? [] : fotosFinales.map((f) => ({ id: f.id, etiqueta: f.etiqueta })),
+      fotos: omitida || anulado ? [] : sinFotosNuevas ? (original?.fotos ?? []) : fotosFinales.map((f) => ({ id: f.id, etiqueta: f.etiqueta })),
+      aves: galpon.aves ?? null,
+      lote: galpon.lote ?? '',
       ...pres,
       flags,
       capturado_dispositivo: ahora().toISOString(),
@@ -429,7 +452,7 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
       ...extra,
     };
     try {
-      await guardarRegistro(reg, omitida || anulado ? [] : fotosFinales);
+      await guardarRegistro(reg, omitida || anulado || sinFotosNuevas ? [] : fotosFinales);
     } catch (e) {
       console.error(e);
       guardando.current = false;
@@ -455,13 +478,12 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
 
   const seguirTrasNumeros = () => {
     // Contador: la foto se pide solo si hay algo que mostrar (más de cero).
-    if (tarea.tipo === 'contador' && !fotosTomadas.length && tarea.foto !== 'no' && (valores[0] ?? 0) > 0) return avanzar({ t: 'foto', i: 0 });
+    if (tarea.tipo === 'contador' && !fotosTomadas.length && tarea.foto !== 'no' && !sinFotosNuevas && (valores[0] ?? 0) > 0) return avanzar({ t: 'foto', i: 0 });
     guardar();
   };
 
   if (guardado) {
-    const enLinea = leerEstado().sync.enLinea;
-    return <Confirmado texto={p.anular ? 'Registro anulado' : 'Guardado'} detalle={enLinea ? 'Enviando al supervisor' : 'Se enviará cuando haya señal'} />;
+    return <Confirmado texto={p.anular ? 'Registro anulado' : 'Guardado'} detalle={detalleEnvio()} />;
   }
 
   // ---- pasos
@@ -603,10 +625,10 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
     const seguir = (valor: boolean) => {
       setOk(valor);
       if (valor) {
-        if (tarea.foto === 'obligatoria') return avanzar({ t: 'foto', i: 0 });
+        if (tarea.foto === 'obligatoria' && !sinFotosNuevas) return avanzar({ t: 'foto', i: 0 });
         return guardar({ ok: true });
       }
-      avanzar({ t: 'foto', i: 0 });
+      avanzar(sinFotosNuevas ? { t: 'nota' } : { t: 'foto', i: 0 });
     };
     return (
       <div className="pantalla">
@@ -649,7 +671,7 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
         </div>
         <div className="pie">
           <button className="boton primario grande" disabled={fotosTomadas.length === 0 && nota.trim().length < 3} onClick={() => guardar()}>
-            Guardar y avisar al supervisor
+            {usuario.rol === 'supervisor' ? 'Guardar' : 'Guardar y avisar al supervisor'}
           </button>
         </div>
         {visor}
@@ -709,7 +731,7 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
         </div>
         <div className="pie">
           <button className="boton primario grande" onClick={seguirTrasNumeros}>
-            {n > 0 && tarea.foto !== 'no' && !fotosTomadas.length ? 'Seguir a la foto' : `Guardar ${n} ${c.unidad}`}
+            {n > 0 && tarea.foto !== 'no' && !sinFotosNuevas && !fotosTomadas.length ? 'Seguir a la foto' : `Guardar ${n} ${c.unidad}`}
           </button>
         </div>
         {visor}
@@ -744,6 +766,22 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
           <span className={`numero${textos[i] ? '' : ' vacio'}`}>{textos[i] ? conMiles(textos[i]) : '0'}</span>
           <span className="unidad">{c.unidad}</span>
         </div>
+        {/°/.test(c.unidad) && (
+          <button
+            type="button"
+            className="enlace gris"
+            style={{ alignSelf: 'center' }}
+            aria-pressed={(textos[i] ?? '').startsWith('-')}
+            onClick={() => {
+              const copia = [...textos];
+              const t = copia[i] ?? '';
+              copia[i] = t.startsWith('-') ? t.slice(1) : `-${t}`;
+              setTextos(copia);
+            }}
+          >
+            {(textos[i] ?? '').startsWith('-') ? 'Quitar el signo menos' : 'Es bajo cero: poner signo menos'}
+          </button>
+        )}
         <Teclado
           valor={textos[i] ?? ''}
           decimales={c.decimales}
@@ -810,6 +848,11 @@ export function Problema(p: { galpon?: string }) {
   const galpon = config.galpones.find((g) => g.id === galponId);
   const nombreLugar = galpon?.nombre ?? 'Plantel en general';
 
+  // La ubicación se pide al saber dónde está el problema (antes solo se tomaba al abrir un galpón).
+  useEffect(() => {
+    if (galponId) abrirVisita(galponId);
+  }, [galponId]);
+
   const retroceder = () => {
     if (camara) return setCamara(false);
     if (foto || sinFoto) {
@@ -868,7 +911,7 @@ export function Problema(p: { galpon?: string }) {
     setTimeout(cerrarPantalla, 1100);
   };
 
-  if (guardado) return <Confirmado texto="Problema informado" detalle={leerEstado().sync.enLinea ? 'El supervisor ya fue avisado' : 'Se enviará cuando haya señal'} />;
+  if (guardado) return <Confirmado texto="Problema informado" detalle={detalleEnvio()} />;
 
   if (camara) {
     return (

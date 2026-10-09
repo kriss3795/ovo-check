@@ -1,6 +1,6 @@
 // Reglas del día a día: qué tareas tocan, qué está hecho y qué se marca para el supervisor.
-import type { Campo, Config, Flag, Galpon, Registro, RegistroLocal, Revision, Tarea } from './tipos';
-import { diaSemana, diasEntre, num } from './util';
+import type { Campo, Config, Flag, Galpon, Pausa, Registro, RegistroLocal, Revision, Tarea } from './tipos';
+import { diaSemana, diasEntre, fechaLocal, num } from './util';
 
 /** Hora límite de cada bloque: pasada esa hora, lo pendiente se muestra como atrasado. */
 export const LIMITE_BLOQUE = { manana: 13, tarde: 20 } as const;
@@ -21,11 +21,40 @@ export const NOMBRE_FLAG: Record<Flag | 'reloj', string> = {
   reloj: 'Reloj del teléfono desajustado',
 };
 
+/**
+ * ¿Correspondía pedir esta tarea (o tener en producción este galpón) ese día?
+ * Hoy manda el interruptor. Para días anteriores se mira su historia: no cuenta antes de que existiera ni durante
+ * sus pausas, así esos días no aparecen como "sin registrar".
+ */
+export function vigenteEn(x: { activo: boolean; desde?: string; pausas?: Pausa[] }, fecha: string): boolean {
+  if (fecha >= fechaLocal()) return x.activo;
+  if (x.desde && fecha < x.desde) return false;
+  if (x.pausas?.length) return !x.pausas.some((p) => fecha >= p.desde && (!p.hasta || fecha < p.hasta));
+  return x.activo;
+}
+
+/** Anota en la ficha el inicio o el fin de una pausa cuando cambia el interruptor. Se llama al guardar. */
+export function anotarPausa<T extends { activo: boolean; desde?: string; pausas?: Pausa[] }>(nuevo: T, antes: T | undefined, hoy: string): T {
+  if (!antes) return { ...nuevo, desde: hoy, ...(nuevo.activo ? {} : { pausas: [{ desde: hoy }] }) };
+  if (antes.activo && !nuevo.activo) return { ...nuevo, pausas: [...(antes.pausas ?? []), { desde: hoy }] };
+  if (!antes.activo && nuevo.activo) {
+    const pausas = [...(antes.pausas ?? [])];
+    const ultima = pausas[pausas.length - 1];
+    // Datos anteriores a esta versión no tienen la fecha en que empezó la pausa: se toma hoy como nuevo inicio.
+    if (!ultima || ultima.hasta) return { ...nuevo, desde: hoy };
+    pausas[pausas.length - 1] = { ...ultima, hasta: hoy };
+    return { ...nuevo, pausas };
+  }
+  return { ...nuevo, desde: antes.desde, pausas: antes.pausas };
+}
+
 export function tareasDe(config: Config, galponId: string, fecha: string): Tarea[] {
+  // Antes de que existiera el plantel no había nada que registrar. (Nunca aplica a hoy.)
+  if (fecha < fechaLocal() && config.granja.creado && fecha < config.granja.creado) return [];
+  const galpon = config.galpones.find((g) => g.id === galponId);
+  if (galpon && !vigenteEn(galpon, fecha)) return [];
   const dia = diaSemana(fecha);
-  return config.tareas.filter(
-    (t) => t.activo && t.dias.includes(dia) && (t.galpones === null || t.galpones.includes(galponId)),
-  );
+  return config.tareas.filter((t) => vigenteEn(t, fecha) && t.dias.includes(dia) && (t.galpones === null || t.galpones.includes(galponId)));
 }
 
 /** Índice de los registros vigentes: el último de cada tarea que no fue reemplazado por una corrección. */
@@ -34,6 +63,7 @@ export class Indice {
   private porClave = new Map<string, RegistroLocal>();
   porId = new Map<string, RegistroLocal>();
   private reemplazo = new Map<string, RegistroLocal>();
+  private anulaciones = new Map<string, RegistroLocal>();
   problemas: RegistroLocal[] = [];
 
   constructor(registros: RegistroLocal[]) {
@@ -51,22 +81,34 @@ export class Indice {
         continue;
       }
       const k = `${r.fecha}|${r.galpon_id}|${r.tarea_id}`;
+      // Una anulación deja sin efecto solo al registro que anula. Si había otro registro válido de la misma tarea
+      // (por ejemplo, un duplicado), ese sigue vigente. Es la misma regla que usa el servidor para los recordatorios.
+      if (r.anulado) {
+        const a = this.anulaciones.get(k);
+        if (!a || momento(r) >= momento(a)) this.anulaciones.set(k, r);
+        continue;
+      }
       const previo = this.porClave.get(k);
       if (!previo || momento(r) >= momento(previo)) this.porClave.set(k, r);
     }
   }
 
+  /** Última anulación de una tarea en un día, si la tarea quedó sin registro vigente. */
+  anulacion(fecha: string, galponId: string, tareaId: string): RegistroLocal | null {
+    const k = `${fecha}|${galponId}|${tareaId}`;
+    return this.porClave.has(k) ? null : (this.anulaciones.get(k) ?? null);
+  }
+
   /** Registro vigente de una tarea en un día (null si está pendiente o fue anulado). */
   vigente(fecha: string, galponId: string, tareaId: string): RegistroLocal | null {
-    const r = this.porClave.get(`${fecha}|${galponId}|${tareaId}`);
-    return r && !r.anulado ? r : null;
+    return this.porClave.get(`${fecha}|${galponId}|${tareaId}`) ?? null;
   }
 
   /** Registros vigentes de un galpón en un día, incluidos los de tareas que ya no existen. */
   delDia(fecha: string, galponId: string): RegistroLocal[] {
     const out: RegistroLocal[] = [];
     const prefijo = `${fecha}|${galponId}|`;
-    for (const [k, r] of this.porClave) if (k.startsWith(prefijo) && !r.anulado) out.push(r);
+    for (const [k, r] of this.porClave) if (k.startsWith(prefijo)) out.push(r);
     return out.sort((a, b) => momento(a) - momento(b));
   }
 
@@ -95,7 +137,7 @@ export class Indice {
   anterior(fecha: string, galponId: string, tareaId: string): RegistroLocal | null {
     let mejor: RegistroLocal | null = null;
     for (const r of this.porClave.values()) {
-      if (r.anulado || r.omitida || r.galpon_id !== galponId || r.tarea_id !== tareaId) continue;
+      if (r.omitida || r.galpon_id !== galponId || r.tarea_id !== tareaId) continue;
       if (r.fecha >= fecha) continue;
       if (r.valores[0] === null || r.valores[0] === undefined) continue;
       if (!mejor || r.fecha > mejor.fecha) mejor = r;
@@ -176,7 +218,7 @@ export function indicadoresTexto(r: Registro): string {
     .join(', ');
 }
 
-export const relojMalo = (r: Registro) => Math.abs(r.reloj_desfase_s ?? 0) > 300;
+export const relojMalo = (r: Registro) => Math.abs(r.reloj_desfase_s ?? 0) > 300 || (r.reloj_atras_s ?? 0) > 120;
 
 export function flagsDe(r: Registro): (Flag | 'reloj')[] {
   const f: (Flag | 'reloj')[] = [...r.flags];

@@ -5,7 +5,10 @@ import type { Config, RegistroLocal, Revision } from './tipos';
 import { fechaHora } from './util';
 
 const celda = (v: unknown) => {
-  const s = v === null || v === undefined ? '' : String(v);
+  let s = v === null || v === undefined ? '' : String(v);
+  // Un texto que empieza con = + - o @ se ejecutaría como fórmula al abrir el archivo en Excel: se le antepone un
+  // apóstrofo para que quede como texto. Los números (incluidos los negativos) no se tocan.
+  if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(,\d+)?$/.test(s)) s = `'${s}`;
   return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 const decimal = (v: number | null | undefined, d: number) =>
@@ -31,8 +34,9 @@ export function armarCsv(config: Config, registros: RegistroLocal[], revisiones:
       r.fecha,
       fechaHora(r.capturado ?? r.capturado_dispositivo).slice(11),
       g?.nombre ?? r.galpon_nombre ?? '',
-      g?.lote ?? '',
-      g?.aves ?? '',
+      // Lote y aves del momento del registro (con ellos se calculó el indicador); en registros antiguos, los actuales.
+      r.lote ?? g?.lote ?? '',
+      r.aves ?? g?.aves ?? '',
       r.tarea ? NOMBRE_BLOQUE[r.tarea.bloque] : '',
       r.tipo === 'problema' ? 'Problema informado' : (r.tarea?.nombre ?? ''),
       dato,

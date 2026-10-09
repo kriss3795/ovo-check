@@ -884,7 +884,7 @@ export function CambiarClave({ obligatorio, alTerminar }: { obligatorio?: boolea
           {ocupado ? 'Guardando…' : 'Guardar clave'}
         </button>
         {obligatorio && (
-          <button type="button" className="boton" onClick={salir}>
+          <button type="button" className="boton" onClick={() => salir(true)}>
             Salir
           </button>
         )}

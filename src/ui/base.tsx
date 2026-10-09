@@ -211,6 +211,34 @@ export function Huevo(p: { fraccion: number; estado?: string; size?: number }) {
   );
 }
 
+// ------------------------------------------------------------------ servidor sin espacio
+/** Aviso cuando el servidor no está recibiendo registros. Nada se pierde: todo espera en cada teléfono. */
+export function AvisoServidor() {
+  const freno = useEstado((e) => e.sync.freno);
+  const pendientes = useEstado((e) => e.sync.pendientes);
+  const lleno = useEstado((e) => e.servidorLleno);
+  const esSup = useEstado((e) => e.usuario?.rol === 'supervisor');
+  if (freno === 'tope' && pendientes > 0) {
+    return (
+      <div className="tarjeta aviso-atencion">
+        <p className="fuerte">El plantel llegó al máximo de registros por día</p>
+        <p className="chico">Lo que falta por enviar queda guardado en este teléfono y se enviará solo en unas horas. Puedes seguir trabajando normal.</p>
+      </div>
+    );
+  }
+  if (!lleno && !(freno === 'lleno' && pendientes > 0)) return null;
+  return (
+    <div className="tarjeta aviso-atencion">
+      <p className="fuerte">El servidor está lleno</p>
+      <p className="chico">
+        {esSup
+          ? 'Los registros nuevos quedan guardados en cada teléfono y llegarán solos cuando haya espacio. No se ha perdido nada. Quien administra Ovo Check ya fue avisado.'
+          : 'Sigue trabajando normal: lo que anotes queda guardado en este teléfono y se enviará solo cuando haya espacio. No borres la app.'}
+      </p>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ estado de envío
 export function Envio({ detalle = false }: { detalle?: boolean }) {
   const s = useEstado((e) => e.sync);
@@ -223,6 +251,11 @@ export function Envio({ detalle = false }: { detalle?: boolean }) {
     clase = total ? 'pendiente' : 'sin-senal';
     texto = total ? `Sin señal, ${total} por enviar` : 'Sin señal';
     Icono = CloudOff;
+  } else if (s.pendientes && s.freno) {
+    // El servidor no está recibiendo registros: quedan guardados en este teléfono.
+    clase = 'pendiente';
+    texto = `${s.pendientes} en espera`;
+    Icono = CloudUpload;
   } else if (total && s.cupo && !s.pendientes) {
     // Los datos ya llegaron; solo esperan fotos porque el servidor no tiene espacio por ahora.
     clase = 'pendiente';

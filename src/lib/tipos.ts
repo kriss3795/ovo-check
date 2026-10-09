@@ -24,6 +24,16 @@ export interface Galpon {
   activo: boolean;
   /** Operarios a cargo del galpón (ids). Vacío = cualquiera. Sirve para ver pendientes por persona y dirigir recordatorios. */
   encargados?: string[];
+  /** Día desde el que el galpón está en producción en la app (AAAA-MM-DD). Antes de ese día no se le piden tareas. */
+  desde?: string;
+  /** Períodos de descanso (sin tareas). El último queda abierto mientras el galpón no está en producción. */
+  pausas?: Pausa[];
+}
+
+/** Período sin tareas: desde ese día (incluido) hasta `hasta` (no incluido). Sin `hasta` = sigue en pausa. */
+export interface Pausa {
+  desde: string;
+  hasta?: string;
 }
 
 export type TipoTarea = 'check' | 'numero' | 'contador' | 'fotos';
@@ -59,12 +69,18 @@ export interface Tarea {
   /** null = todos los galpones. */
   galpones: string[] | null;
   activo: boolean;
+  /** Día desde el que se pide la tarea (AAAA-MM-DD). Los días anteriores no la muestran como sin registrar. */
+  desde?: string;
+  /** Períodos en que estuvo en pausa. */
+  pausas?: Pausa[];
 }
 
 export interface Granja {
   id: string;
   nombre: string;
   codigo: string;
+  /** Día en que se creó el plantel (lo pone el servidor). */
+  creado?: string;
 }
 
 export interface Config {
@@ -117,6 +133,11 @@ export interface Registro {
   anulado: boolean;
   corrige: string | null;
   motivo: string;
+  /** Aves y lote del galpón al momento de registrar: con esos datos se calculó el indicador. */
+  aves?: number | null;
+  lote?: string;
+  /** El reloj del teléfono estaba más atrás que la última hora conocida (segundos). Señal de reloj cambiado a mano. */
+  reloj_atras_s?: number;
   // Lo siguiente lo pone el servidor al recibir.
   capturado?: string;
   recibido?: string;
@@ -167,4 +188,6 @@ export type RegistroLocal = Registro & {
   _pend?: boolean;
   /** Reloj del teléfono (ms) al momento de capturar, para medir cuánto esperó. */
   _ms?: number;
+  /** Cuánto estaba atrasado ese reloj respecto de la última hora conocida (ms). */
+  _atras?: number;
 };

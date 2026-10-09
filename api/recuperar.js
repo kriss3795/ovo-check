@@ -4,35 +4,16 @@
 //   SUPABASE_SERVICE_KEY   clave secreta de Supabase (service_role). Nunca va en el teléfono.
 //   GMAIL_USER             cuenta de Gmail que envía los correos
 //   GMAIL_APP_PASSWORD     "contraseña de aplicación" de esa cuenta (16 letras)
-import nodemailer from 'nodemailer';
+import { USUARIO, correoListo, escapar, transporte } from './_correo.js';
 
 const limpio = (v) => String(v ?? '').trim();
 const URL_BASE = limpio(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL).replace(/\/+$/, '');
 const SERVICIO = limpio(process.env.SUPABASE_SERVICE_KEY);
-const USUARIO = limpio(process.env.GMAIL_USER);
-const CLAVE = limpio(process.env.GMAIL_APP_PASSWORD).replace(/\s+/g, '');
-
-function transporte() {
-  const port = Number(process.env.SMTP_PORT || 465);
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port,
-    secure: port === 465,
-    auth: { user: USUARIO, pass: CLAVE },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
-    tls: process.env.SMTP_SIN_TLS ? { rejectUnauthorized: false } : undefined,
-    ignoreTLS: Boolean(process.env.SMTP_SIN_TLS),
-  });
-}
 
 const ocultar = (correo) => {
   const [a, b] = correo.split('@');
   return `${a.slice(0, 2)}${'*'.repeat(Math.max(2, a.length - 2))}@${b}`;
 };
-
-const escapar = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -42,7 +23,6 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
   const servidorListo = Boolean(URL_BASE && SERVICIO);
-  const correoListo = Boolean(USUARIO && CLAVE);
 
   // Diagnóstico: ¿está configurado el envío? Con ?probar=1 además se conecta a Gmail para comprobar la clave.
   if (req.method === 'GET') {

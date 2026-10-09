@@ -9,13 +9,13 @@ import { armarCsv, entregarArchivo } from '../lib/exportar';
 import { anotarBajada, descargarFotos, fotosDe, fotosPorVencer, nombreFoto } from '../lib/fotos';
 import {
   Indice, NOMBRE_BLOQUE, NOMBRE_FLAG, avanceGalpon, conjuntoRevisadas, decimalesIndicador, esCritico, esDudoso,
-  evaluarCampo, flagsDe, indicadoresTexto, momento, relojMalo, resumen, tareasDe,
+  evaluarCampo, flagsDe, indicadoresTexto, momento, relojMalo, resumen, tareasDe, vigenteEn,
 } from '../lib/logica';
 import { mensajeError } from '../lib/nube';
 import { CATEGORIAS_PROBLEMA } from '../lib/plantillas';
 import type { Config, Galpon, RegistroLocal, Tarea } from '../lib/tipos';
 import { distancia, duracion, fechaCorta, fechaHora, fechaLarga, fechaRelativa, haceCuanto, hora, mayuscula, num, sumarDias } from '../lib/util';
-import { Barra, Envio, Foto, Hoja, Huevo, IconoTarea, Vacio, VisorFoto } from './base';
+import { AvisoServidor, Barra, Envio, Foto, Hoja, Huevo, IconoTarea, Vacio, VisorFoto } from './base';
 import { Ajustes } from './ajustes';
 import { TarjetaAvisos } from './avisos';
 import { EtiquetaEstado, Falta, useIndice } from './operario';
@@ -110,7 +110,7 @@ function TarjetaGalpon({ g, fecha, indice, revisadas }: { g: Galpon; fecha: stri
           <span className="fila-titulo" style={{ fontSize: 19 }}>
             {g.nombre}
           </span>
-          <EtiquetaEstado estado={fecha < hoy && a.estado === 'atrasado' ? 'sin_empezar' : a.estado} />
+          <EtiquetaEstado estado={fecha < hoy ? (a.estado === 'atrasado' ? (a.hechas > 0 ? 'incompleto' : 'sin_registros') : a.estado === 'sin_tareas' ? 'sin_tareas_dia' : a.estado) : a.estado} />
         </span>
         <span className="fila-detalle" style={{ display: 'block' }}>
           {detalle.join(', ')}
@@ -276,10 +276,15 @@ function Hoy() {
     () => fotosPorVencer(config.granja.id, registros, sumarDias(hoy, -(diasFotos - 7)), sumarDias(hoy, -diasFotos)),
     [config.granja.id, registros, hoy, diasFotos, bajarFotos],
   );
+  const personaDe = (id: string | null) => config.usuarios.find((u) => u.id === id);
   const conProblema = dispositivos.filter((d) => {
     if (!d.visto) return false;
     const horas = (Date.now() - new Date(d.visto).getTime()) / 3600000;
-    return horas < 24 * 14 && (d.pendientes > 0 ? horas > 0.25 : horas > 30);
+    if (horas >= 24 * 14) return false;
+    // Con datos sin enviar: basta un rato sin conexión. Sin pendientes conocidos: solo los teléfonos de operarios
+    // activos que llevan más de un día y medio sin conectarse (pueden estar trabajando sin señal).
+    const u = personaDe(d.usuario_id);
+    return d.pendientes > 0 ? horas > 0.25 : horas > 36 && u?.rol === 'operario' && u.activo;
   });
 
   return (
@@ -290,15 +295,17 @@ function Hoy() {
           <ClipboardList size={20} aria-hidden /> Hacer una ronda
         </button>
       </div>
+      <AvisoServidor />
       <TarjetaAvisos />
       <TarjetaSeguridad />
       <PrimerosPasos />
-      {fotos && fotos.usadas >= fotos.max * 0.9 && (
+      {fotos && (fotos.lleno || fotos.usadas >= fotos.max * 0.9) && (
         <div className="tarjeta aviso-atencion">
-          <p className="fuerte">{fotos.usadas >= fotos.max ? 'El espacio para fotos está lleno' : 'Queda poco espacio para fotos'}</p>
+          <p className="fuerte">{fotos.lleno || fotos.usadas >= fotos.max ? 'El espacio para fotos está lleno' : 'Queda poco espacio para fotos'}</p>
           <p className="chico">
-            Hay {num(fotos.usadas)} de {num(fotos.max)} fotos guardadas. Los números siguen llegando con normalidad; las fotos nuevas esperan en cada
-            teléfono hasta que se libere espacio (cada foto se borra sola a los {fotos.dias} días).
+            {!fotos.lleno || fotos.usadas >= fotos.max * 0.9 ? `Hay ${num(fotos.usadas)} de ${num(fotos.max)} fotos guardadas. ` : ''}
+            Los números siguen llegando con normalidad; las fotos nuevas esperan en cada teléfono hasta que se libere espacio (cada foto se borra
+            sola a los {fotos.dias} días).
           </p>
         </div>
       )}
@@ -369,10 +376,10 @@ function Hoy() {
                 </span>
                 <span className="fila-cuerpo">
                   <span className="fila-titulo" style={{ display: 'block' }}>
-                    {d.nombre || 'Teléfono'}
+                    {personaDe(d.usuario_id)?.nombre ?? (d.nombre || 'Teléfono')}
                   </span>
                   <span className="fila-detalle" style={{ display: 'block' }}>
-                    Última conexión {haceCuanto(d.visto)}
+                    {personaDe(d.usuario_id) && d.nombre ? `${d.nombre}. ` : ''}Última conexión {haceCuanto(d.visto)}
                     {d.pendientes > 0 && `, ${d.pendientes} por enviar`}
                   </span>
                 </span>
@@ -731,13 +738,19 @@ function HistorialDia({ config, fecha }: { config: Config; fecha: string }) {
   const indice = useIndice();
   const { revisadas } = usePendientes();
   const carga = usePeriodo(fecha);
-  const galpones = config.galpones.filter((g) => g.activo);
+  // Los galpones que estaban en producción ese día (uno que hoy descansa sigue apareciendo en sus días anteriores).
+  const galpones = config.galpones.filter((g) => vigenteEn(g, fecha));
   return (
     <>
       <NavFecha fecha={fecha} alCambiar={(f) => cambiarRuta({ fecha: f })} />
       {carga.estado === 'cargando' && <p className="suave centro">Cargando ese día…</p>}
       {carga.estado === 'error' && <div className="tarjeta aviso-atencion">No se pudo cargar ese día. {carga.error}</div>}
-      {carga.estado === 'listo' && (
+      {carga.estado === 'listo' && galpones.length === 0 && (
+        <Vacio titulo="Sin galpones en producción ese día">
+          <p>Ese día el plantel todavía no estaba en la app, o sus galpones estaban en descanso.</p>
+        </Vacio>
+      )}
+      {carga.estado === 'listo' && galpones.length > 0 && (
         <div className="rejilla">
           {galpones.map((g) => (
             <TarjetaGalpon key={g.id} g={g} fecha={fecha} indice={indice} revisadas={revisadas} />
@@ -782,11 +795,13 @@ function ResumenTarea() {
     if (r.omitida) return { texto: 'No se hizo', mal: false, id: r.id };
     const v = r.valores[op.i];
     let x: number | null | undefined = v;
-    if (conIndicador) x = r.indicadores?.[op.i];
-    else if (c.acumulativo) {
+    if (c.acumulativo) {
+      // Medidor: se recalcula con la lectura anterior vigente, así una corrección de ayer arregla también el consumo de hoy.
       const prev = indice.anterior(f, g.id, op.tarea.id);
-      x = evaluarCampo(c, v, g, prev && prev.valores[op.i] != null ? { valor: prev.valores[op.i]!, fecha: prev.fecha } : null, f).base;
-    }
+      const ev = evaluarCampo(c, v, r.aves !== undefined ? { ...g, aves: r.aves } : g, prev && prev.valores[op.i] != null ? { valor: prev.valores[op.i]!, fecha: prev.fecha } : null, f);
+      // Registros anteriores a esta versión no guardaban las aves del día: se usa el indicador que se calculó entonces.
+      x = !conIndicador ? ev.base : r.aves === undefined && r.indicadores?.[op.i] != null ? r.indicadores[op.i] : ev.indicador;
+    } else if (conIndicador) x = r.indicadores?.[op.i];
     return { texto: x === null || x === undefined ? '' : num(x, dec(x)), mal: false, id: r.id };
   };
 
@@ -1004,6 +1019,25 @@ export function GalponDia({ id, fecha }: { id: string; fecha: string }) {
                 {del.map((t) => {
                   const r = indice.vigente(fecha, id, t.id);
                   if (r) return <FilaRegistro key={t.id} r={r} conGalpon={false} conFecha={false} />;
+                  const anulada = indice.anulacion(fecha, id, t.id);
+                  if (anulada) {
+                    return (
+                      <button key={t.id} className="fila" onClick={() => ir({ p: 'registro', id: anulada.id })}>
+                        <span className="medallon atencion">
+                          <Ban size={24} />
+                        </span>
+                        <span className="fila-cuerpo">
+                          <span className="fila-titulo" style={{ display: 'block', fontWeight: 600 }}>
+                            {t.nombre}
+                          </span>
+                          <span className="fila-detalle" style={{ display: 'block' }}>
+                            Registro anulado{anulada.motivo ? `: ${anulada.motivo}` : ''}. {fecha < hoy ? 'No se volvió a registrar' : 'Pendiente de registrar de nuevo'}
+                          </span>
+                        </span>
+                        <ChevronRight className="flecha" aria-hidden />
+                      </button>
+                    );
+                  }
                   return (
                     <div key={t.id} className="fila">
                       <span className="medallon">
@@ -1087,7 +1121,8 @@ export function RegistroDetalle({ id }: { id: string }) {
   const persona = (uid: string, respaldo?: string) => config.usuarios.find((u) => u.id === uid)?.nombre ?? respaldo ?? 'Persona eliminada';
   const revision = revisiones.find((v) => v.registro_id === reg.id);
   const historia = indice.historia(reg);
-  const flags = flagsDe(reg);
+  // Al operario no se le muestran las marcas de verificación (lectura menor que la anterior, lejos del galpón, etc.).
+  const flags = esSup ? flagsDe(reg) : flagsDe(reg).filter((f) => f === 'problema' || f === 'omitida');
   const necesitaRevision = !reg.anulado && (esCritico(reg) || esDudoso(reg));
   const puedeCorregir = reg.tipo === 'tarea' && !reg.anulado && (esSup || reg.fecha === hoy);
   const diasFotos = fotosNube?.dias ?? 30;
@@ -1105,7 +1140,7 @@ export function RegistroDetalle({ id }: { id: string }) {
     <div className="pantalla">
       <Barra titulo={nombreRegistro(reg)} sub={`${nombreGalpon(config, reg)}, ${fechaRelativa(reg.fecha).toLowerCase()}`} />
       <div className="contenido">
-        <section className={`tarjeta ${esCritico(reg) ? 'aviso-mal' : ''}`}>
+        <section className={`tarjeta ${(esSup ? esCritico(reg) : reg.flags.includes('problema')) ? 'aviso-mal' : ''}`}>
           {reg.anulado ? (
             <p className="subtitulo">Registro anulado</p>
           ) : reg.omitida ? (

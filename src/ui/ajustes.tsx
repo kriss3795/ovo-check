@@ -3,13 +3,13 @@ import {
   ArrowDown, ArrowUp, Bell, Check, ChevronRight, ClipboardList, Database, Images, KeyRound, LogOut, MapPin, Plus,
   Send, Settings2, Smartphone, Trash2, Users, Warehouse, Wifi, X,
 } from 'lucide-react';
-import { administrar, diagnostico, guardarConfig, salir } from '../lib/app';
+import { administrar, ahora, diagnostico, guardarConfig, salir } from '../lib/app';
 import { avisar, ir, useEstado, volver } from '../lib/estado';
-import { cargaDiaria, NOMBRE_BLOQUE } from '../lib/logica';
+import { anotarPausa, cargaDiaria, NOMBRE_BLOQUE } from '../lib/logica';
 import { mensajeError } from '../lib/nube';
 import { BIBLIOTECA, RUTINA_CLASICA, campoVacio, tareaDesde, tareaVacia } from '../lib/plantillas';
 import type { Campo, Config, Galpon, Tarea, Usuario } from '../lib/tipos';
-import { DIAS_CORTOS, claveDebil, haceCuanto, hashPin, iniciales, nombreDia, num, uid } from '../lib/util';
+import { DIAS_CORTOS, claveDebil, fechaLocal, haceCuanto, hashPin, iniciales, nombreDia, num, uid } from '../lib/util';
 import { Barra, Confirmar, Hoja, ICONOS, IconoTarea, Interruptor, aNumero } from './base';
 import { CambiarClave, correoValido } from './inicio';
 import { BotonInstalar, PaginaAvisos } from './avisos';
@@ -95,7 +95,7 @@ export function Ajustes() {
       </button>
       {exportar && <HojaExportar cerrar={() => setExportar(false)} />}
       {bajarFotos && <HojaFotos cerrar={() => setBajarFotos(false)} />}
-      {confirmarSalir && <Confirmar titulo="¿Cerrar la sesión de supervisor?" texto="Para volver a entrar necesitarás tu clave." accion="Cerrar sesión" alConfirmar={salir} cerrar={() => setConfirmarSalir(false)} />}
+      {confirmarSalir && <Confirmar titulo="¿Cerrar la sesión de supervisor?" texto="Para volver a entrar necesitarás tu clave." accion="Cerrar sesión" alConfirmar={() => salir(true)} cerrar={() => setConfirmarSalir(false)} />}
     </>
   );
 }
@@ -217,7 +217,7 @@ function Tareas() {
                     className="fila compacta"
                     disabled={ocupado}
                     onClick={async () => {
-                      if (await guardar((c) => void c.tareas.push(tareaDesde(b)), `Se agregó ${b.nombre}`)) setAgregar(false);
+                      if (await guardar((c) => void c.tareas.push(tareaDesde(b, fechaLocal(ahora()))), `Se agregó ${b.nombre}`)) setAgregar(false);
                     }}
                   >
                     <span className="medallon">
@@ -341,8 +341,10 @@ function EditorTarea({ id }: { id: string }) {
     setError('');
     const ok = await guardar((c) => {
       const i = c.tareas.findIndex((x) => x.id === limpio.id);
-      if (i >= 0) c.tareas[i] = limpio;
-      else c.tareas.push(limpio);
+      // Se anota desde cuándo se pide y sus pausas: los días en que no correspondía no aparecen como sin registrar.
+      const conHistoria = anotarPausa(limpio, i >= 0 ? c.tareas[i] : undefined, fechaLocal(ahora()));
+      if (i >= 0) c.tareas[i] = conHistoria;
+      else c.tareas.push(conHistoria);
     }, nueva ? 'Tarea creada' : 'Tarea guardada');
     if (ok) volver();
   };
@@ -600,8 +602,10 @@ function EditorGalpon({ id }: { id: string }) {
     if (config.galpones.some((x) => x.id !== limpio.id && x.nombre.toLowerCase() === limpio.nombre.toLowerCase())) return avisar('Ya hay un galpón con ese nombre', 'mal');
     const ok = await guardar((c) => {
       const i = c.galpones.findIndex((x) => x.id === limpio.id);
-      if (i >= 0) c.galpones[i] = limpio;
-      else c.galpones.push(limpio);
+      // Se anota desde cuándo está en producción y sus descansos: esos días no aparecen como sin registrar.
+      const conHistoria = anotarPausa(limpio, i >= 0 ? c.galpones[i] : undefined, fechaLocal(ahora()));
+      if (i >= 0) c.galpones[i] = conHistoria;
+      else c.galpones.push(conHistoria);
     }, nuevo ? 'Galpón agregado' : 'Galpón guardado');
     if (ok) volver();
   };
@@ -887,7 +891,7 @@ function HojaPersona({ u, esYo, cerrar }: { u: Usuario; esYo: boolean; cerrar: (
       </label>
       {u.rol === 'supervisor' && (
         <label className="campo">
-          <span>Correo para recuperar la clave</span>
+          <span>Correo (con él entra y recupera su clave)</span>
           <div className="linea-h">
             <input className="entrada" type="email" inputMode="email" value={correo} onChange={(e) => setCorreo(e.target.value)} maxLength={80} autoCapitalize="none" autoCorrect="off" spellCheck={false} />
             {correo.trim().toLowerCase() !== (u.correo ?? '') && correoValido(correo) && (

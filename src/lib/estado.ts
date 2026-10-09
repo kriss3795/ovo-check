@@ -26,6 +26,8 @@ export interface Sync {
   error: string | null;
   /** El servidor no acepta más fotos por ahora (cupo lleno). */
   cupo: boolean;
+  /** El servidor no está recibiendo registros: 'lleno' = sin espacio; 'tope' = el plantel llegó a su máximo diario. */
+  freno: 'lleno' | 'tope' | null;
 }
 
 export interface Estado {
@@ -39,7 +41,9 @@ export interface Estado {
   registros: RegistroLocal[];
   revisiones: Revision[];
   dispositivos: DispositivoInfo[];
-  fotosNube: { usadas: number; max: number; dias: number } | null;
+  fotosNube: { usadas: number; max: number; dias: number; lleno?: boolean } | null;
+  /** El servidor avisó que se quedó sin espacio para registros nuevos. */
+  servidorLleno: boolean;
   /** Clave del plantel para operarios. Solo la recibe un supervisor con sesión. */
   clavePlantel: string | null;
   /** Claves del plantel equivocadas en las últimas 24 horas. */
@@ -58,6 +62,8 @@ export interface Estado {
   avisos: 'no_disponible' | 'bloqueado' | 'apagado' | 'activo';
   /** El navegador ofrece instalar la app en la pantalla de inicio. */
   instalable: boolean;
+  /** Ya se descargó una versión nueva de la app: se aplica al recargar. */
+  actualizacion: boolean;
 }
 
 let estado: Estado = {
@@ -71,11 +77,12 @@ let estado: Estado = {
   revisiones: [],
   dispositivos: [],
   fotosNube: null,
+  servidorLleno: false,
   clavePlantel: null,
   intentosFallidos: 0,
   desvinculado: false,
   rolIngreso: null,
-  sync: { enLinea: navigator.onLine, ocupado: false, pendientes: 0, fotosPendientes: 0, ultima: null, error: null, cupo: false },
+  sync: { enLinea: navigator.onLine, ocupado: false, pendientes: 0, fotosPendientes: 0, ultima: null, error: null, cupo: false, freno: null },
   visitas: {},
   ruta: [],
   aviso: null,
@@ -83,6 +90,7 @@ let estado: Estado = {
   tic: 0,
   avisos: 'no_disponible',
   instalable: false,
+  actualizacion: false,
 };
 
 const oyentes = new Set<() => void>();

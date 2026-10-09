@@ -34,9 +34,33 @@ const DIAS_LOCALES = 60;
 const HORAS_INACTIVO_OPERARIO = 4;
 const DIAS_SESION_SUPERVISOR = 7;
 
-/** Hora actual corregida con la del servidor si el reloj del teléfono está muy corrido. */
+/** Hora del teléfono, corregida con la del servidor si su reloj está muy corrido. */
+const estimado = () => Date.now() + (Math.abs(desfase) > 120000 ? desfase : 0);
+
+// La hora más avanzada que la app ha visto en este teléfono. El tiempo no retrocede: si el reloj aparece más atrás
+// que esto, alguien lo cambió a mano (por ejemplo, para anotar "en la mañana" algo que se hizo en la tarde).
+let relojAlto = 0;
+let relojGuardado = 0;
+const TOLERANCIA_RELOJ = 120000;
+
+function subirReloj(forzar = false) {
+  const e = estimado();
+  if (e > relojAlto) relojAlto = e;
+  if (forzar || relojAlto - relojGuardado > 60000) {
+    relojGuardado = relojAlto;
+    idb.guardar('kv', relojAlto, 'reloj_alto').catch(() => {});
+  }
+}
+
+/** Cuánto está atrasado el reloj del teléfono respecto de la última hora conocida (0 si no lo está). */
+const atrasoReloj = () => {
+  const d = relojAlto - estimado();
+  return d > TOLERANCIA_RELOJ ? d : 0;
+};
+
+/** Hora actual. Nunca anterior a la última hora que la app ya vio en este teléfono. */
 export function ahora(): Date {
-  return new Date(Date.now() + (Math.abs(desfase) > 120000 ? desfase : 0));
+  return new Date(atrasoReloj() ? relojAlto : estimado());
 }
 
 const sesionDe = (u: Usuario | null) => (u ? credenciales.sesiones[u.id] : undefined);
@@ -85,7 +109,7 @@ export async function iniciar() {
   }
   idb.pedirPersistencia();
   try {
-    const [cfg, disp, ses, cred, cur, des, vis, pin, regs, revs, col] = await Promise.all([
+    const [cfg, disp, ses, cred, cur, des, vis, pin, regs, revs, col, alto] = await Promise.all([
       idb.leer<{ config: Config; version: number }>('kv', 'config'),
       idb.leer<{ token: string; id: string; nombre: string }>('kv', 'dispositivo'),
       idb.leer<SesionLocal>('kv', 'sesion'),
@@ -97,10 +121,12 @@ export async function iniciar() {
       idb.todos<RegistroLocal>('registros'),
       idb.todos<Revision>('revisiones'),
       idb.todos<ItemCola>('cola'),
+      idb.leer<number>('kv', 'reloj_alto'),
     ]);
     credenciales = cred ?? credenciales;
     cursor = cur ?? cursor;
     desfase = des ?? 0;
+    relojAlto = relojGuardado = alto ?? 0;
     pines = pin ?? {};
     cola = (col ?? []).sort((a, b) => a.creado - b.creado);
     const hoy = fechaLocal(ahora());
@@ -140,8 +166,9 @@ export async function iniciar() {
 
 function sesionVigente(u: Usuario, s: SesionLocal, hoy: string) {
   if (u.rol === 'supervisor') return Date.now() - s.ultimo < DIAS_SESION_SUPERVISOR * 86400000;
-  // Operario: la sesión dura el día y se cierra tras varias horas sin uso (teléfonos compartidos entre turnos).
-  return s.fecha === hoy && Date.now() - s.ultimo < HORAS_INACTIVO_OPERARIO * 3600000;
+  // Operario: la sesión se cierra tras varias horas sin uso (teléfonos compartidos entre turnos). No se corta a
+  // medianoche: quien está registrando a esa hora no pierde lo que tiene a medio anotar.
+  return Date.now() - s.ultimo < HORAS_INACTIVO_OPERARIO * 3600000;
 }
 
 export const raizDe = (u: Usuario) => (u.rol === 'supervisor' ? { p: 'sup', tab: 'hoy' } : { p: 'op' });
@@ -167,11 +194,13 @@ async function revisarSesion() {
 function latido() {
   const e = leerEstado();
   poner({ tic: e.tic + 1 });
+  subirReloj();
   revisarSesion();
   if (document.visibilityState !== 'visible' || !e.dispositivo) return;
   const hace = Date.now() - (e.sync.ultima ?? 0);
   const esSup = e.usuario?.rol === 'supervisor';
-  const hayCola = cola.some((c) => !c.proximo || c.proximo <= Date.now());
+  const frenado = Date.now() < frenoHasta;
+  const hayCola = cola.some((c) => (c.tipo === 'registro' ? !frenado && c.error !== 'sesion' : !c.proximo || c.proximo <= Date.now()));
   if (hayCola || hace > (esSup ? 25000 : 180000)) sincronizar();
 }
 
@@ -232,8 +261,9 @@ export async function crearGranja(d: {
       lat: null,
       lng: null,
       activo: true,
+      desde: fechaLocal(ahora()),
     })),
-    tareas: RUTINA_CLASICA.map(tareaDesde),
+    tareas: RUTINA_CLASICA.map((b) => tareaDesde(b, fechaLocal(ahora()))),
   };
   const r = await rpc('oc_crear_granja', { config, clave_operarios: d.claveOperarios.trim(), dispositivo: d.dispositivo });
   await instalarGranja(r, d.dispositivo);
@@ -363,7 +393,7 @@ export async function entrarSupervisor(u: Usuario, clave: string): Promise<void>
         'SIN_VERIFICAR',
         credenciales.hashes[u.id]
           ? 'Sin conexión no se puede verificar esa clave. Revísala o inténtalo cuando tengas señal.'
-          : 'Necesitas conexión para entrar por primera vez en este equipo.',
+          : 'Sin conexión no se puede entrar como supervisor en este equipo. Inténtalo cuando tengas señal.',
         true,
       );
     }
@@ -407,7 +437,11 @@ export async function recuperarClave(u: Usuario, codigo: string, nueva: string) 
   }
 }
 
-export function salir() {
+/**
+ * Cierra la sesión. Con `olvidar` (botón "Cerrar sesión") el equipo deja de guardar la huella de la clave del
+ * supervisor: en un teléfono compartido no queda nada con qué intentar adivinarla.
+ */
+export function salir(olvidar = false) {
   const e = leerEstado();
   // Al salir un supervisor, este equipo deja de guardar las claves y correos de los supervisores.
   if (e.usuario?.rol === 'supervisor' && e.config) {
@@ -415,6 +449,7 @@ export function salir() {
     const sesion = credenciales.sesiones[e.usuario.id];
     if (sesion && e.dispositivo) rpc('oc_salir', { token: e.dispositivo.token, sesion }).catch(() => {});
     delete credenciales.sesiones[e.usuario.id];
+    if (olvidar) delete credenciales.hashes[e.usuario.id];
     idb.guardar('kv', credenciales, 'credenciales');
     // Y deja de recibir las alertas de supervisión. (Los recordatorios de un operario sí se mantienen.)
     soltarAvisos();
@@ -427,7 +462,7 @@ export function salir() {
       }),
     };
     idb.guardar('kv', { config, version: e.version }, 'config');
-    poner({ config, dispositivos: [], fotosNube: null, clavePlantel: null, intentosFallidos: 0 });
+    poner({ config, dispositivos: [], fotosNube: null, servidorLleno: false, clavePlantel: null, intentosFallidos: 0 });
   }
   idb.borrar('kv', 'sesion');
   poner({ usuario: null, fase: leerEstado().config ? 'ingreso' : 'bienvenida', ruta: [], cambiarClave: false });
@@ -499,7 +534,9 @@ export interface FotoNueva {
 
 /** Guarda un registro en el teléfono y lo deja en la cola de envío. Nunca falla por falta de señal. */
 export async function guardarRegistro(reg: Registro, fotos: FotoNueva[]) {
-  const local: RegistroLocal = { ...reg, _pend: true, _ms: Date.now() };
+  const atras = atrasoReloj();
+  subirReloj(true);
+  const local: RegistroLocal = { ...reg, ...(atras ? { reloj_atras_s: Math.round(atras / 1000), _atras: atras } : {}), _pend: true, _ms: Date.now() };
   const ahoraMs = Date.now();
   await idb.guardarVarios(
     'fotos',
@@ -597,16 +634,25 @@ async function olvidarPlantel() {
   pines = {};
   cursor = { cursor: null, desde: '' };
   contarCola();
-  poner({ config: null, dispositivo: null, usuario: null, registros: [], revisiones: [], visitas: {}, dispositivos: [], fotosNube: null, clavePlantel: null, intentosFallidos: 0, desvinculado: false, ruta: [], cambiarClave: false, fase: 'bienvenida' });
+  poner({ config: null, dispositivo: null, usuario: null, registros: [], revisiones: [], visitas: {}, dispositivos: [], fotosNube: null, servidorLleno: false, clavePlantel: null, intentosFallidos: 0, desvinculado: false, ruta: [], cambiarClave: false, fase: 'bienvenida' });
 }
 
 /** Trae del servidor los registros de un período (historial y exportación). */
 export async function traerPeriodo(desde: string, hasta: string): Promise<RegistroLocal[]> {
   const e = leerEstado();
   try {
-    const r = await rpc('oc_registros', { token: e.dispositivo!.token, sesion: sesionDe(e.usuario), desde, hasta }, 60000);
+    // El servidor entrega de a 5.000 registros: se piden páginas hasta tenerlos todos.
+    const mapa = new Map<string, RegistroLocal>();
+    let despues: string | null = null;
+    let despuesId: string | null = null;
+    for (let pagina = 0; pagina < 200; pagina++) {
+      const r: any = await rpc('oc_registros', { token: e.dispositivo!.token, sesion: sesionDe(e.usuario), desde, hasta, despues, despues_id: despuesId }, 60000);
+      for (const x of r.registros as RegistroLocal[]) mapa.set(x.id, x);
+      if (!r.mas || !r.despues) break;
+      despues = r.despues;
+      despuesId = r.despues_id;
+    }
     const pendientes = e.registros.filter((x) => x._pend && x.fecha >= desde && x.fecha <= hasta);
-    const mapa = new Map<string, RegistroLocal>((r.registros as RegistroLocal[]).map((x) => [x.id, x]));
     for (const p of pendientes) if (!mapa.has(p.id)) mapa.set(p.id, p);
     return ordenar([...mapa.values()]);
   } catch (err) {
@@ -628,9 +674,13 @@ export async function asegurarPeriodo(desde: string): Promise<void> {
 
 // ------------------------------------------------------------------ sincronización
 const sinMarcas = (r: RegistroLocal): Registro => {
-  const { _pend, _ms, ...resto } = r;
+  const { _pend, _ms, _atras, ...resto } = r;
   return resto;
 };
+
+/** Si el servidor no está recibiendo registros (lleno o tope diario), no se le insiste hasta esta hora. */
+let frenoHasta = 0;
+const ESPERA_FRENO = 10 * 60000;
 
 function reintentarLuego(c: ItemCola, error: string) {
   c.intentos++;
@@ -674,7 +724,8 @@ export async function sincronizar(forzar = false): Promise<void> {
     }
 
     // 2. Registros (pesan poco: van primero y en lote)
-    for (;;) {
+    let freno: 'lleno' | 'tope' | null = !forzar && Date.now() < frenoHasta ? leerEstado().sync.freno : null;
+    for (; !freno; ) {
       // Lo que firmó un supervisor espera a que ese supervisor tenga su sesión abierta en este equipo.
       const quien = leerEstado().usuario;
       const sesionReg = sesionDe(quien);
@@ -687,16 +738,29 @@ export async function sincronizar(forzar = false): Promise<void> {
       const items = lote
         .map((c) => porId.get(c.ref))
         .filter((r): r is RegistroLocal => Boolean(r))
-        .map((r) => ({ registro: sinMarcas(r), transcurrido_ms: Math.max(0, Date.now() - (r._ms ?? Date.now())) }));
+        // Si al capturar el reloj estaba atrasado, ese atraso se descuenta: la hora no puede quedar antes de la última conocida.
+        .map((r) => ({ registro: sinMarcas(r), transcurrido_ms: Math.max(0, Date.now() - (r._ms ?? Date.now()) - (r._atras ?? 0)) }));
       if (items.length) {
-        const r = await rpc('oc_registrar', { token, sesion: sesionReg ?? null, ahora: new Date().toISOString(), items });
+        let r: any;
+        try {
+          r = await rpc('oc_registrar', { token, sesion: sesionReg ?? null, ahora: new Date().toISOString(), items });
+        } catch (err) {
+          // Sin espacio en el servidor: los registros se quedan en este teléfono y se reintenta más tarde. Lo demás sigue.
+          if (err instanceof ErrorNube && (err.codigo === 'OC_LLENO' || err.codigo === 'OC_TOPE_DIA')) {
+            freno = err.codigo === 'OC_LLENO' ? 'lleno' : 'tope';
+            frenoHasta = Date.now() + ESPERA_FRENO;
+            ponerSync({ freno });
+            break;
+          }
+          throw err;
+        }
         for (const x of (r.rechazados ?? []) as { id: string; motivo: string }[]) if (x.motivo === 'sesion') enEspera.add(x.id);
         anotarHora(r.ahora);
         const confirmados: RegistroLocal[] = [];
         for (const res of r.resultados as any[]) {
           const local = porId.get(res.id);
           if (!local) continue;
-          const { _pend, _ms, ...limpio } = local;
+          const { _pend, _ms, _atras, ...limpio } = local;
           confirmados.push({ ...limpio, capturado: res.capturado, recibido: res.recibido, reloj_desfase_s: res.reloj_desfase_s, demora_s: res.demora_s });
         }
         await idb.guardarVarios('registros', confirmados);
@@ -758,7 +822,8 @@ export async function sincronizar(forzar = false): Promise<void> {
       }
     }
 
-    ponerSync({ enLinea: true, error: null, ultima: Date.now() });
+    if (!freno) frenoHasta = 0;
+    ponerSync({ enLinea: true, error: null, ultima: Date.now(), freno });
   } catch (err) {
     if (err instanceof ErrorNube && err.codigo === 'OC_TOKEN') {
       marcarDesvinculado();
@@ -781,10 +846,14 @@ export async function sincronizar(forzar = false): Promise<void> {
 }
 
 function anotarHora(servidor: string) {
-  const d = new Date(servidor).getTime() - Date.now();
+  const t = new Date(servidor).getTime();
+  const d = t - Date.now();
   if (Number.isFinite(d)) {
     desfase = d;
     idb.guardar('kv', desfase, 'desfase');
+    // La hora del servidor manda: corrige la marca aunque el reloj del teléfono haya estado adelantado.
+    relojAlto = t;
+    subirReloj(true);
   }
 }
 
@@ -805,6 +874,7 @@ async function traer(token: string) {
     cursor: completo ? null : cursor.cursor,
   });
   anotarHora(r.ahora);
+  if (Boolean(r.lleno) !== e.servidorLleno) poner({ servidorLleno: Boolean(r.lleno) });
   if (r.config) await ponerConfig(r.config, r.version);
   const nuevos = r.registros as RegistroLocal[];
   if (nuevos.length) {

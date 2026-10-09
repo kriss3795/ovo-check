@@ -247,11 +247,12 @@ export const BIBLIOTECA: Base[] = [
   },
 ];
 
-export const tareaDesde = (b: Base): Tarea => ({
+export const tareaDesde = (b: Base, desde?: string): Tarea => ({
   ...structuredClone(b),
   id: uid(),
   activo: true,
   galpones: null,
+  ...(desde ? { desde } : {}),
 });
 
 export const tareaVacia = (): Tarea => ({
