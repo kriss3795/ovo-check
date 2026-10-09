@@ -47,7 +47,23 @@ export default async function handler(req, res) {
   // Lo que sigue no debe impedir la limpieza de fotos: si falla, se informa y se reintenta mañana.
   let abandonados = 0;
   let espacio = null;
+  let avisosBorrado = 0;
   try {
+    // Antes de eliminar un plantel abandonado se le avisa por correo a sus supervisores, con un mes de anticipación.
+    for (const g of (await rpc('oc_abandono_por_avisar')) ?? []) {
+      if (!correoListo || !g.correos?.length) continue;
+      await transporte().sendMail(correoAbandono(g)).then(() => avisosBorrado++).catch((e) => console.error('No se pudo avisar el borrado', e?.message));
+    }
+    // El primer día de cada mes: recordatorio de respaldo a los supervisores (el plan gratuito no hace copias).
+    if (avisosListos && new Date().getUTCDate() === 1 && (await tocaTurno('respaldo-mes', 20))) {
+      for (const g of (await rpc('oc_respaldo_mensual')) ?? []) {
+        avisos += await notificar(g.supervisores, {
+          titulo: 'Respaldo del mes',
+          texto: `${g.granja}: descarga una copia de tus datos en Ajustes, Descargar datos. Toma un minuto.`,
+          etiqueta: 'respaldo',
+        });
+      }
+    }
     abandonados = (await rpc('oc_limpieza'))?.planteles_abandonados ?? 0;
     const u = await rpc('oc_uso');
     // Esta dirección es pública: solo muestra el porcentaje. El detalle va por correo.
@@ -61,12 +77,30 @@ export default async function handler(req, res) {
     console.error('No se pudo revisar el espacio', e?.message ?? e);
     espacio = { error: 'No se pudo revisar el espacio' };
   }
-  return res.status(200).json({ ok: true, borradas, dias, avisos, abandonados, espacio });
+  return res.status(200).json({ ok: true, borradas, dias, avisos, abandonados, avisosBorrado, espacio });
 }
 
 const DESTINO = String(process.env.CORREO_DUENO ?? '').trim();
 const pct = (a, b) => Math.round((100 * Number(a)) / Math.max(1, Number(b)));
 const mb = (n) => `${Math.round(Number(n)).toLocaleString('es-CL')} MB`;
+
+/** Correo a los supervisores de un plantel que nunca registró nada y que nadie abre: se eliminará si sigue así. */
+function correoAbandono(g) {
+  const asunto = `Ovo Check: el plantel ${g.granja} se eliminará en ${g.dias} días`;
+  const cuerpo = [
+    `El plantel "${g.granja}" fue creado en Ovo Check pero nunca registró ningún dato y nadie lo ha abierto en varios meses.`,
+    `Si nadie lo usa, se eliminará en ${g.dias} días para liberar el cupo.`,
+    'Para conservarlo basta con abrir la app y entrar al plantel una vez. Si ya no lo necesitas, no tienes que hacer nada.',
+  ];
+  return {
+    from: `"Ovo Check" <${USUARIO}>`,
+    to: USUARIO,
+    bcc: g.correos,
+    subject: asunto,
+    text: cuerpo.join('\n\n') + '\n',
+    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#1c282d;font-size:16px">${cuerpo.map((t) => `<p>${escapar(t)}</p>`).join('')}</div>`,
+  };
+}
 
 /** Correo para quien administra la app, con cuánto espacio queda y qué hacer. */
 function correoEspacio(u) {

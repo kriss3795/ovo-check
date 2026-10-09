@@ -28,6 +28,11 @@ export interface Galpon {
   desde?: string;
   /** Períodos de descanso (sin tareas). El último queda abierto mientras el galpón no está en producción. */
   pausas?: Pausa[];
+  /**
+   * Día en que empezó el lote actual (AAAA-MM-DD). Desde ese día las comparaciones (lectura anterior, aves vivas,
+   * cambio de un día a otro) parten de cero. Los registros anteriores no se borran: quedan en el historial.
+   */
+  reinicio?: string;
 }
 
 /** Período sin tareas: desde ese día (incluido) hasta `hasta` (no incluido). Sin `hasta` = sigue en pausa. */
@@ -58,7 +63,7 @@ export interface Campo {
    */
   saldo?: boolean;
   /**
-   * Límites lógicos del resultado (el indicador si lo hay; si no, el número o el consumo del día). Fuera de ellos
+   * Límites de alerta del resultado (el indicador si lo hay; si no, el número o el consumo del día). Fuera de ellos
    * se alerta al supervisor. El operario no los ve. Sin definir = se usan los que sugiere la app para ese tipo de dato;
    * null = sin límite.
    */

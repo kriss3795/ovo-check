@@ -116,6 +116,8 @@ create index if not exists oc_suscripciones_granja on oc_suscripciones (granja_i
 alter table oc_granjas add column if not exists clave_operarios text;
 alter table oc_granjas add column if not exists nombre_norm text;
 create unique index if not exists oc_granjas_nombre_norm on oc_granjas (nombre_norm);
+-- Cuándo se avisó a los supervisores que su plantel, abandonado sin registros, se va a eliminar.
+alter table oc_granjas add column if not exists aviso_abandono timestamptz;
 
 -- Intentos fallidos (búsquedas, claves), para frenar a quien prueba muchas veces.
 create table if not exists oc_intentos (
@@ -1322,7 +1324,8 @@ begin
 end $$;
 
 -- Limpieza diaria (solo el servidor de la app): planteles que alguien creó para probar y dejó botados, para que no
--- ocupen cupos. Solo se borra un plantel que NUNCA registró nada y que nadie abrió en 180 días (ajuste dias_abandono).
+-- ocupen cupos. Solo se borra un plantel que NUNCA registró nada y que nadie abrió en 180 días (ajuste dias_abandono),
+-- y solo después de haberle avisado por correo a sus supervisores con un mes de anticipación.
 -- Un plantel con registros no se borra jamás por su cuenta, aunque sus galpones pasen meses vacíos.
 create or replace function oc_limpieza(p jsonb) returns jsonb
 language plpgsql security definer set search_path = public, pg_temp as $$
@@ -1330,12 +1333,64 @@ declare n integer;
 begin
   delete from oc_granjas g
     where g.creado < now() - make_interval(days => oc__dias_abandono())
+      -- Nunca sin aviso: a sus supervisores se les escribió al menos 25 días antes.
+      and g.aviso_abandono < now() - interval '25 days'
       and not exists (select 1 from oc_registros r where r.granja_id = g.id)
       and not exists (select 1 from oc_dispositivos d where d.granja_id = g.id and d.visto > now() - make_interval(days => oc__dias_abandono()));
   get diagnostics n = row_count;
   delete from oc_intentos where creado < now() - interval '2 days';
   return jsonb_build_object('planteles_abandonados', n);
 end $$;
+
+-- Planteles abandonados que se eliminarán en unos 30 días: se entregan una sola vez, con los correos de sus
+-- supervisores, para avisarles antes. Si alguien vuelve a abrir el plantel, el aviso se olvida. (Solo el servidor de la app.)
+create or replace function oc_abandono_por_avisar(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare res jsonb; margen integer := oc__dias_abandono() - 30;
+begin
+  update oc_granjas g set aviso_abandono = null
+    where g.aviso_abandono is not null
+      and (exists (select 1 from oc_dispositivos d where d.granja_id = g.id and d.visto > g.aviso_abandono)
+           or exists (select 1 from oc_registros r where r.granja_id = g.id));
+  with marcados as (
+    update oc_granjas g set aviso_abandono = now()
+    where g.aviso_abandono is null
+      and g.creado < now() - make_interval(days => margen)
+      and not exists (select 1 from oc_registros r where r.granja_id = g.id)
+      and not exists (select 1 from oc_dispositivos d where d.granja_id = g.id and d.visto > now() - make_interval(days => margen))
+    returning g.nombre, g.config
+  )
+  select coalesce(jsonb_agg(jsonb_build_object('granja', m.nombre, 'dias', 30,
+      'correos', coalesce((select jsonb_agg(distinct lower(x ->> 'correo')) from jsonb_array_elements(m.config -> 'usuarios') x
+                           where x ->> 'rol' = 'supervisor' and coalesce(x ->> 'correo', '') <> ''), '[]'::jsonb))), '[]'::jsonb)
+    into res from marcados m;
+  return res;
+end $$;
+
+-- Teléfonos que llevan más de un día sin conectarse y con registros sin enviar: lo que tienen guardado solo existe
+-- en ese teléfono. (Solo el servidor de la app.)
+create or replace function oc_telefonos_atrasados(p jsonb) returns jsonb
+language sql stable security definer set search_path = public, pg_temp as $$
+  select coalesce(jsonb_agg(jsonb_build_object('granja', g.nombre, 'supervisores', oc__suscripciones(g, 'supervisor'), 'telefonos', t.lista)), '[]'::jsonb)
+  from oc_granjas g
+  join lateral (
+    select jsonb_agg(jsonb_build_object(
+        'persona', (select x ->> 'nombre' from jsonb_array_elements(g.config -> 'usuarios') x where x ->> 'id' = d.usuario_id),
+        'nombre', d.nombre, 'pendientes', d.pendientes,
+        'dias', greatest(1, floor(extract(epoch from (now() - d.visto)) / 86400)::int)) order by d.visto) as lista
+    from oc_dispositivos d
+    where d.granja_id = g.id and not d.revocado and d.pendientes > 0
+      and d.visto < now() - interval '24 hours' and d.visto > now() - interval '21 days'
+  ) t on t.lista is not null;
+$$;
+
+-- Planteles en uso, con las suscripciones de sus supervisores, para el recordatorio mensual de respaldo.
+create or replace function oc_respaldo_mensual(p jsonb) returns jsonb
+language sql stable security definer set search_path = public, pg_temp as $$
+  select coalesce(jsonb_agg(jsonb_build_object('granja', g.nombre, 'supervisores', oc__suscripciones(g, 'supervisor'))), '[]'::jsonb)
+  from oc_granjas g
+  where exists (select 1 from oc_registros r where r.granja_id = g.id and r.recibido > now() - interval '35 days');
+$$;
 
 -- ---------------------------------------------------------------------
 --  Soporte (se ejecuta solo desde este SQL Editor)
@@ -1419,7 +1474,7 @@ begin
     end if;
     if f.proname in ('oc_fotos_vencidas', 'oc_recuperacion_pedir', 'oc_avisos_pendientes', 'oc_pendientes_del_dia',
                      'oc_fotos_por_vencer', 'oc_suscripcion_propia', 'oc_suscripciones_borrar', 'oc_equipos_por_avisar', 'oc_turno',
-                     'oc_uso', 'oc_limpieza') then
+                     'oc_uso', 'oc_limpieza', 'oc_abandono_por_avisar', 'oc_telefonos_atrasados', 'oc_respaldo_mensual') then
       execute format('grant execute on function %s to service_role', f.firma);
     end if;
   end loop;

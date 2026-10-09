@@ -72,6 +72,7 @@ function contarCola() {
     pendientes: cola.filter((c) => c.tipo !== 'foto').length,
     fotosPendientes: cola.filter((c) => c.tipo === 'foto').length,
     cupo: cola.some((c) => c.tipo === 'foto' && c.error === 'cupo'),
+    masAntiguo: cola.length ? Math.min(...cola.map((c) => c.creado)) : null,
   });
 }
 

@@ -39,6 +39,20 @@ export default async function handler(req, res) {
         });
       }
     }
+    // Una vez al día: teléfonos que llevan más de un día sin conectarse y con registros sin enviar.
+    // Lo que tienen guardado solo existe en ese teléfono; si se pierde o se borra la app, se pierde.
+    if (bloque === 'manana') {
+      for (const g of (await rpc('oc_telefonos_atrasados')) ?? []) {
+        for (const t of g.telefonos ?? []) {
+          const quien = t.persona ? `El teléfono de ${t.persona}` : `Un teléfono (${t.nombre || 'sin nombre'})`;
+          enviadas += await notificar(g.supervisores, {
+            titulo: `${t.pendientes} ${t.pendientes === 1 ? 'registro sin enviar' : 'registros sin enviar'} en un teléfono`,
+            texto: `${g.granja}: ${quien} no se conecta hace ${t.dias} ${t.dias === 1 ? 'día' : 'días'}. Esos datos solo están en ese teléfono: hay que abrir la app con internet.`,
+            etiqueta: 'sin-enviar',
+          });
+        }
+      }
+    }
     return res.status(200).json({ ok: true, bloque, granjas: granjas?.length ?? 0, enviadas });
   } catch (e) {
     return res.status(502).json({ error: String(e?.message ?? e) });

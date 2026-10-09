@@ -15,7 +15,7 @@ import { mensajeError } from '../lib/nube';
 import { CATEGORIAS_PROBLEMA } from '../lib/plantillas';
 import type { Config, Galpon, RegistroLocal, Tarea } from '../lib/tipos';
 import { distancia, duracion, fechaCorta, fechaHora, fechaLarga, fechaRelativa, haceCuanto, hora, mayuscula, num, sumarDias } from '../lib/util';
-import { AvisoServidor, Barra, Envio, Foto, Hoja, Huevo, IconoTarea, Vacio, VisorFoto } from './base';
+import { AvisoServidor, AvisoSinEnviar, Barra, Envio, Foto, Hoja, Huevo, IconoTarea, Vacio, VisorFoto } from './base';
 import { Ajustes } from './ajustes';
 import { TarjetaAvisos } from './avisos';
 import { EtiquetaEstado, Falta, useIndice } from './operario';
@@ -296,6 +296,7 @@ function Hoy() {
         </button>
       </div>
       <AvisoServidor />
+      <AvisoSinEnviar />
       <TarjetaAvisos />
       <TarjetaSeguridad />
       <PrimerosPasos />
@@ -1166,7 +1167,9 @@ export function RegistroDetalle({ id }: { id: string }) {
   const necesitaRevision = !reg.anulado && (esCritico(reg) || esDudoso(reg));
   const puedeCorregir = reg.tipo === 'tarea' && !reg.anulado && (esSup || reg.fecha === hoy);
   const diasFotos = fotosNube?.dias ?? 30;
-  const antigua = (Date.now() - momento(reg)) / 86400000 > diasFotos;
+  const edadFotos = (Date.now() - momento(reg)) / 86400000;
+  const antigua = edadFotos > diasFotos;
+  const diasParaBorrar = Math.ceil(diasFotos - edadFotos);
   const lejos = galpon?.lat != null && galpon.lng != null && reg.lat != null && reg.lng != null ? Math.round(distancia(galpon.lat, galpon.lng, reg.lat, reg.lng)) : null;
 
   const marcar = async () => {
@@ -1240,6 +1243,13 @@ export function RegistroDetalle({ id }: { id: string }) {
           )}
         </section>
 
+        {esSup && reg.fotos.length > 0 && !antigua && diasParaBorrar <= 7 && (
+          <div className="tarjeta aviso-atencion chico">
+            {reg.fotos.length === 1 ? 'Esta foto se borra' : 'Estas fotos se borran'} de la nube {diasParaBorrar <= 1 ? 'mañana' : `en ${diasParaBorrar} días`}.{' '}
+            {reg.fotos.length === 1 ? 'Tócala para guardarla en este equipo si quieres conservarla.' : 'Toca cada una para guardarla en este equipo si quieres conservarlas.'} El
+            registro y sus números no se borran.
+          </div>
+        )}
         {reg.fotos.length > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: reg.fotos.length > 1 ? '1fr 1fr' : '1fr', gap: 10 }}>
             {reg.fotos.map((f) => (

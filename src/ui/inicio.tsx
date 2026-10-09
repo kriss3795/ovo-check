@@ -8,7 +8,7 @@ import { avisar, leerEstado, poner, useEstado } from '../lib/estado';
 import { mensajeError } from '../lib/nube';
 import type { Usuario } from '../lib/tipos';
 import { claveDebil, iniciales, vibrar } from '../lib/util';
-import { Barra, Envio, Hoja, PuntosPin, Teclado, useAtras } from './base';
+import { AvisoSinEnviar, Barra, Envio, Hoja, PuntosPin, Teclado, useAtras } from './base';
 import { BotonInstalar } from './avisos';
 
 export const correoValido = (c: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(c.trim());
@@ -582,6 +582,7 @@ export function Ingreso() {
         {cabecera}
         <div className="contenido">
           <h2 className="titulo">¿Cómo vas a entrar?</h2>
+          <AvisoSinEnviar />
           <ElegirRol alElegir={elegirRol} />
           <BotonInstalar />
           <button className="enlace gris" style={{ alignSelf: 'center', marginTop: 'auto' }} onClick={() => poner({ fase: 'bienvenida' })}>

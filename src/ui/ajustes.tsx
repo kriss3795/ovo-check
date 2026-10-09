@@ -1,15 +1,15 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   ArrowDown, ArrowUp, Bell, Check, ChevronRight, ClipboardList, Database, Images, KeyRound, LogOut, MapPin, Plus,
-  Send, Settings2, Smartphone, Trash2, TriangleAlert, Users, Warehouse, Wifi, X,
+  RotateCcw, Send, Settings2, Smartphone, Trash2, TriangleAlert, Users, Warehouse, Wifi, X,
 } from 'lucide-react';
 import { administrar, ahora, diagnostico, guardarConfig, salir } from '../lib/app';
 import { avisar, ir, useEstado, volver } from '../lib/estado';
-import { anotarPausa, cargaDiaria, limitesDe, logicaDe, NOMBRE_BLOQUE, unidadResultado } from '../lib/logica';
+import { anotarPausa, cargaDiaria, limitesDe, limitesSugeridos, LOGICA_DEFECTO, logicaDe, NOMBRE_BLOQUE, unidadResultado } from '../lib/logica';
 import { mensajeError } from '../lib/nube';
 import { BIBLIOTECA, GRUPOS_TAREAS, RUTINA_CLASICA, campoAvesVivas, campoVacio, tareaDesde, tareaVacia } from '../lib/plantillas';
 import type { Campo, Config, Galpon, Tarea, Usuario } from '../lib/tipos';
-import { DIAS_CORTOS, claveDebil, fechaLocal, haceCuanto, hashPin, iniciales, nombreDia, num, uid } from '../lib/util';
+import { DIAS_CORTOS, claveDebil, fechaLarga, fechaLocal, haceCuanto, hashPin, iniciales, nombreDia, num, uid } from '../lib/util';
 import { Barra, Confirmar, Hoja, ICONOS, IconoTarea, Interruptor, aNumero } from './base';
 import { CambiarClave, correoValido } from './inicio';
 import { BotonInstalar, PaginaAvisos } from './avisos';
@@ -74,7 +74,7 @@ export function Ajustes() {
       <div className="lista">
         {fila(<ClipboardList size={24} />, 'Tareas', `${config.tareas.filter((t) => t.activo).length} activas, cerca de ${carga.minutos} min de registro por galpón`, () => ir({ p: 'ajuste', cual: 'tareas' }))}
         {fila(<Warehouse size={24} />, 'Galpones', `${config.galpones.filter((g) => g.activo).length} en producción`, () => ir({ p: 'ajuste', cual: 'galpones' }))}
-        {fila(<TriangleAlert size={24} />, 'Alertas de mediciones', 'Límites lógicos de cada dato. Solo los ves tú', () => ir({ p: 'ajuste', cual: 'logica' }))}
+        {fila(<TriangleAlert size={24} />, 'Alertas de mediciones', 'Límites de cada dato. Solo los ves tú', () => ir({ p: 'ajuste', cual: 'logica' }))}
         {fila(<Users size={24} />, 'Personas', `${operarios} ${operarios === 1 ? 'operario' : 'operarios'}`, () => ir({ p: 'ajuste', cual: 'personas' }))}
       </div>
       <p className="seccion">Teléfonos</p>
@@ -599,12 +599,65 @@ function Galpones() {
   );
 }
 
+/**
+ * Sale un lote y entra otro: el galpón parte de cero (aves, lote y comparaciones) sin eliminarlo.
+ * No se borra ningún registro: lo del lote anterior queda en el historial y en las descargas, con su lote.
+ */
+function HojaLoteNuevo({ galpon, cerrar }: { galpon: Galpon; cerrar: () => void }) {
+  const [lote, setLote] = useState('');
+  const [aves, setAves] = useState('');
+  const [descanso, setDescanso] = useState(false);
+  const { ocupado, guardar } = useGuardar();
+  const hoy = fechaLocal(ahora());
+  const enviar = async () => {
+    const ok = await guardar((c) => {
+      const i = c.galpones.findIndex((x) => x.id === galpon.id);
+      if (i < 0) return;
+      const antes = c.galpones[i];
+      c.galpones[i] = anotarPausa({ ...antes, lote: lote.trim(), aves: aNumero(aves), reinicio: hoy, activo: !descanso }, antes, hoy);
+    }, `${galpon.nombre} empieza un lote nuevo`);
+    if (ok) {
+      cerrar();
+      volver();
+    }
+  };
+  return (
+    <Hoja titulo={`Lote nuevo en ${galpon.nombre}`} cerrar={cerrar}>
+      <div className="tarjeta aviso-info">
+        <p className="chico fuerte">No se borra ningún registro.</p>
+        <p className="chico">
+          Todo lo del lote anterior{galpon.lote ? ` (${galpon.lote})` : ''} queda guardado en Historial y en Descargar datos. Desde hoy el galpón
+          parte de cero: las aves, el lote y las comparaciones con el día anterior (medidor, aves vivas, cambios de consumo).
+        </p>
+      </div>
+      <label className="campo">
+        <span>Nombre del lote nuevo (opcional)</span>
+        <input className="entrada" value={lote} onChange={(e) => setLote(e.target.value)} maxLength={30} placeholder="Por ejemplo: 26-B, Lohmann Brown" />
+      </label>
+      <label className="campo">
+        <span>Aves alojadas</span>
+        <input className="entrada" inputMode="numeric" value={aves} onChange={(e) => setAves(e.target.value.replace(/[^\d.]/g, ''))} placeholder="Por ejemplo: 12000" />
+        <small>Si todavía no llegan, déjalo en blanco y anótalo después.</small>
+      </label>
+      <Interruptor activo={descanso} alCambiar={setDescanso}>
+        <b>Dejarlo en descanso por ahora</b>
+        <br />
+        <span className="chico suave">Vacío sanitario: no se piden tareas hasta que lo vuelvas a poner En producción.</span>
+      </Interruptor>
+      <button className="boton primario grande" disabled={ocupado} onClick={enviar}>
+        {ocupado ? 'Guardando…' : 'Empezar el lote nuevo'}
+      </button>
+    </Hoja>
+  );
+}
+
 function EditorGalpon({ id }: { id: string }) {
   const config = useEstado((e) => e.config)!;
   const original = config.galpones.find((g) => g.id === id);
   const [g, setG] = useState<Galpon>(() => original ? { ...original } : { id: uid(), nombre: `Galpón ${config.galpones.length + 1}`, aves: null, lote: '', lat: null, lng: null, activo: true });
   const [aves, setAves] = useState(original?.aves ? String(original.aves) : '');
   const [borrar, setBorrar] = useState(false);
+  const [loteNuevo, setLoteNuevo] = useState(false);
   const [ubicando, setUbicando] = useState(false);
   const { ocupado, guardar } = useGuardar();
   const nuevo = !original;
@@ -702,6 +755,18 @@ function EditorGalpon({ id }: { id: string }) {
           </div>
         </div>
         {!nuevo && (
+          <div className="tarjeta pila">
+            <p className="fuerte">Lote nuevo en este galpón</p>
+            <p className="chico suave">
+              {original?.reinicio ? `El lote actual empezó el ${fechaLarga(original.reinicio)}. ` : ''}
+              Cuando sale un lote y entra otro, el galpón parte de cero sin tener que eliminarlo ni crearlo de nuevo.
+            </p>
+            <button className="boton" onClick={() => setLoteNuevo(true)}>
+              <RotateCcw size={20} aria-hidden /> Empezar un lote nuevo
+            </button>
+          </div>
+        )}
+        {!nuevo && (
           <button className="boton peligro-suave" onClick={() => setBorrar(true)}>
             <Trash2 size={20} aria-hidden /> Eliminar galpón
           </button>
@@ -712,6 +777,7 @@ function EditorGalpon({ id }: { id: string }) {
           {ocupado ? 'Guardando…' : nuevo ? 'Agregar galpón' : 'Guardar cambios'}
         </button>
       </div>
+      {loteNuevo && original && <HojaLoteNuevo galpon={original} cerrar={() => setLoteNuevo(false)} />}
       {borrar && (
         <Confirmar
           titulo={`¿Eliminar ${g.nombre}?`}
@@ -1005,8 +1071,14 @@ function AlertasLogicas() {
     .flatMap((t) => t.campos.map((c, i) => ({ t, c, i })).filter((x) => !x.c.saldo));
   const logica = logicaDe(config);
   const [lim, setLim] = useState<Record<string, { min: string; max: string }>>(() =>
-    Object.fromEntries(datos.map(({ t, i }) => [`${t.id}|${i}`, { min: deLimite(limitesDe(t.campos, i).min), max: deLimite(limitesDe(t.campos, i).max) }])),
+    Object.fromEntries(datos.map(({ t, i }) => [`${t.id}|${i}`, { min: deLimite(limitesDe(t.nombre, t.campos, i).min), max: deLimite(limitesDe(t.nombre, t.campos, i).max) }])),
   );
+  const sugerir = () => {
+    setLim(Object.fromEntries(datos.map(({ t, i }) => [`${t.id}|${i}`, { min: deLimite(limitesSugeridos(t.nombre, t.campos, i).min), max: deLimite(limitesSugeridos(t.nombre, t.campos, i).max) }])));
+    setRatio({ min: deLimite(LOGICA_DEFECTO.ratioMin), max: deLimite(LOGICA_DEFECTO.ratioMax) });
+    setCambio(deLimite(LOGICA_DEFECTO.cambioPct));
+    avisar('Se pusieron los límites sugeridos. Revisa y guarda.', 'info');
+  };
   const [ratio, setRatio] = useState({ min: deLimite(logica.ratioMin), max: deLimite(logica.ratioMax) });
   const [cambio, setCambio] = useState(deLimite(logica.cambioPct));
   const [error, setError] = useState('');
@@ -1025,8 +1097,17 @@ function AlertasLogicas() {
         t.campos.forEach((c, i) => {
           const l = lim[`${t.id}|${i}`];
           if (!l || c.saldo) return;
-          c.min = aLimite(l.min);
-          c.max = aLimite(l.max);
+          const a = aLimite(l.min);
+          const b = aLimite(l.max);
+          const s = limitesSugeridos(t.nombre, t.campos, i);
+          // Lo que queda igual a lo sugerido no se fija: así sigue al día si la app mejora sus sugerencias.
+          if (a === s.min && b === s.max) {
+            delete c.min;
+            delete c.max;
+          } else {
+            c.min = a;
+            c.max = b;
+          }
         });
       }
       cfg.logica = { ratioMin: aLimite(ratio.min), ratioMax: aLimite(ratio.max), cambioPct: aLimite(cambio) };
@@ -1049,12 +1130,13 @@ function AlertasLogicas() {
 
   return (
     <div className="pantalla">
-      <Barra titulo="Alertas de mediciones" sub="Para detectar datos fuera de lo lógico" />
+      <Barra titulo="Alertas de mediciones" sub="Te avisa cuando un dato se sale de estos límites" />
       <div className="contenido">
         <div className="tarjeta aviso-info">
           <p className="chico">
-            Cuando un dato queda fuera de estos límites te llega una alerta, con el número y cómo se calculó, para que preguntes. Son límites amplios
-            para detectar errores y cosas raras, no tus metas productivas: ajústalos a tu plantel o déjalos en blanco.
+            Cuando un dato queda fuera de estos límites te llega una alerta, con el número y cómo se calculó, para que preguntes o actúes a tiempo.
+            Vienen con valores sugeridos para ponedoras en producción: ajústalos a tu genética, tu clima y tu manejo, o déjalos en blanco para no
+            recibir ese aviso.
           </p>
           <p className="chico fuerte" style={{ marginTop: 6 }}>El operario no ve estos límites ni recibe ningún aviso.</p>
         </div>
@@ -1089,6 +1171,9 @@ function AlertasLogicas() {
             <input className="entrada" inputMode="decimal" value={cambio} onChange={(e) => setCambio(solo(e.target.value))} placeholder="Sin aviso" />
           </label>
         </section>
+        <button className="boton" onClick={sugerir}>
+          Usar los límites sugeridos
+        </button>
         <div className="tarjeta suave chico">
           Además, siempre se avisa cuando una lectura de medidor es menor que la anterior, cuando la temperatura mínima es mayor que la máxima y cuando
           las aves vivas no calzan con la mortalidad.

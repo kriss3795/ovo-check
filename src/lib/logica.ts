@@ -1,5 +1,6 @@
 // Reglas del día a día: qué tareas tocan, qué está hecho y qué se marca para el supervisor.
 import type { Campo, Config, Flag, Galpon, Logica, Pausa, Registro, RegistroLocal, Revision, Tarea } from './tipos';
+import { BIBLIOTECA, RUTINA_CLASICA } from './plantillas';
 import { diaSemana, diasEntre, fechaCorta, fechaLocal, fechaRelativa, num } from './util';
 
 /** Hora límite de cada bloque: pasada esa hora, lo pendiente se muestra como atrasado. */
@@ -15,7 +16,7 @@ export const NOMBRE_FLAG: Record<Flag | 'reloj', string> = {
   problema: 'Problema informado',
   retrocede: 'Lectura menor que la anterior',
   no_calza: 'Las aves vivas no calzan',
-  ilogico: 'Fuera de lo lógico',
+  ilogico: 'Fuera de los límites',
   lejos: 'Lejos del galpón',
   sin_foto: 'Sin foto',
   omitida: 'No se hizo',
@@ -59,6 +60,10 @@ export function tareasDe(config: Config, galponId: string, fecha: string): Tarea
   return config.tareas.filter((t) => vigenteEn(t, fecha) && t.dias.includes(dia) && (t.galpones === null || t.galpones.includes(galponId)));
 }
 
+/** Día de inicio del lote actual de cada galpón que lo tenga. */
+export const reiniciosDe = (galpones: Galpon[] | undefined): Record<string, string> =>
+  Object.fromEntries((galpones ?? []).filter((g) => g.reinicio).map((g) => [g.id, g.reinicio!]));
+
 /** Índice de los registros vigentes: el último de cada tarea que no fue reemplazado por una corrección. */
 export class Indice {
   private reemplazados = new Set<string>();
@@ -67,8 +72,11 @@ export class Indice {
   private reemplazo = new Map<string, RegistroLocal>();
   private anulaciones = new Map<string, RegistroLocal>();
   problemas: RegistroLocal[] = [];
+  /** Día en que empezó el lote actual de cada galpón: lo anterior no se usa para comparar con lo de ahora. */
+  private reinicios: Record<string, string>;
 
-  constructor(registros: RegistroLocal[]) {
+  constructor(registros: RegistroLocal[], reinicios: Record<string, string> = {}) {
+    this.reinicios = reinicios;
     for (const r of registros) {
       this.porId.set(r.id, r);
       if (r.corrige) {
@@ -135,6 +143,12 @@ export class Indice {
     return this.reemplazo.get(r.id);
   }
 
+  /** Desde qué día valen los registros para comparar con uno de `fecha`: el inicio del lote, si esa fecha ya es del lote actual. */
+  private corte(fecha: string, galponId: string): string {
+    const inicio = this.reinicios[galponId];
+    return inicio && fecha >= inicio ? inicio : '';
+  }
+
   /**
    * Últimas aves vivas anotadas en un galpón, hasta ese día (o antes de ese día si `estricto`).
    * Es el número que anotó el operario; la app no lo calcula.
@@ -142,8 +156,9 @@ export class Indice {
   avesAnotadas(fecha: string, galponId: string, estricto = false): { aves: number; fecha: string } | null {
     let mejor: RegistroLocal | null = null;
     let valor = 0;
+    const corte = this.corte(fecha, galponId);
     for (const r of this.porClave.values()) {
-      if (r.omitida || r.galpon_id !== galponId) continue;
+      if (r.omitida || r.galpon_id !== galponId || r.fecha < corte) continue;
       if (estricto ? r.fecha >= fecha : r.fecha > fecha) continue;
       const i = r.tarea?.campos.findIndex((c) => c.saldo) ?? -1;
       const v = i >= 0 ? r.valores[i] : null;
@@ -159,9 +174,10 @@ export class Indice {
   /** Lectura anterior de una tarea (para medidores acumulativos). */
   anterior(fecha: string, galponId: string, tareaId: string): RegistroLocal | null {
     let mejor: RegistroLocal | null = null;
+    const corte = this.corte(fecha, galponId);
     for (const r of this.porClave.values()) {
       if (r.omitida || r.galpon_id !== galponId || r.tarea_id !== tareaId) continue;
-      if (r.fecha >= fecha) continue;
+      if (r.fecha >= fecha || r.fecha < corte) continue;
       if (r.valores[0] === null || r.valores[0] === undefined) continue;
       if (!mejor || r.fecha > mejor.fecha) mejor = r;
     }
@@ -261,9 +277,15 @@ export function avesPara(indice: Indice, galpon: Galpon, fecha: string, campos: 
   return { aves: galpon.aves ?? null, origen: 'ficha' };
 }
 
-// ------------------------------------------------------------------ fuera de lo lógico
-export const LOGICA_DEFECTO: Logica = { ratioMin: 1.2, ratioMax: 3.5, cambioPct: 30 };
-export const logicaDe = (c: Config): Logica => ({ ...LOGICA_DEFECTO, ...(c.logica ?? {}) });
+// ------------------------------------------------------------------ límites de alerta
+export const LOGICA_DEFECTO: Logica = { ratioMin: 1.5, ratioMax: 3, cambioPct: 20 };
+/** Los valores con que salió la primera versión: quien los tenga guardados sin haberlos cambiado pasa a los actuales. */
+const LOGICA_ANTERIOR: Logica = { ratioMin: 1.2, ratioMax: 3.5, cambioPct: 30 };
+export function logicaDe(c: Config): Logica {
+  const l = c.logica;
+  if (!l || (l.ratioMin === LOGICA_ANTERIOR.ratioMin && l.ratioMax === LOGICA_ANTERIOR.ratioMax && l.cambioPct === LOGICA_ANTERIOR.cambioPct)) return LOGICA_DEFECTO;
+  return { ...LOGICA_DEFECTO, ...l };
+}
 
 export type Magnitud = 'agua' | 'alimento' | 'temperatura' | 'postura' | 'mortalidad' | null;
 
@@ -280,20 +302,50 @@ export function magnitud(campos: Campo[], i: number): Magnitud {
   return null;
 }
 
-/** Límites amplios que sugiere la app: marcan lo imposible o muy raro, no la meta productiva. */
-const LIMITES_SUGERIDOS: Record<Exclude<Magnitud, null>, { min: number | null; max: number | null }> = {
-  temperatura: { min: -5, max: 45 },
-  agua: { min: 100, max: 500 }, // ml por ave al día
-  alimento: { min: 60, max: 160 }, // g por ave al día
+type Par = { min: number | null; max: number | null };
+/**
+ * Límites que sugiere la app para una ponedora en producción. Están puestos donde conviene que el supervisor se entere,
+ * bastante antes de lo que ya sería grave. Cada plantel los ajusta a su genética, su clima y su manejo.
+ */
+const LIMITES_SUGERIDOS: Record<Exclude<Magnitud, null | 'temperatura'>, Par> = {
+  agua: { min: 150, max: 400 }, // ml por ave al día
+  alimento: { min: 85, max: 140 }, // g por ave al día
   postura: { min: null, max: 100 }, // %
-  mortalidad: { min: null, max: 0.3 }, // % del lote en un día
+  mortalidad: { min: null, max: 0.1 }, // % del lote en un día
 };
+const TEMPERATURA: { minima: Par; maxima: Par; otra: Par } = {
+  minima: { min: 5, max: 26 }, // la mínima del día: frío bajo 5 °C; una noche que no baja de 26 °C es calor sostenido
+  maxima: { min: 12, max: 32 }, // la máxima del día: sobre 32 °C ya hay estrés por calor
+  otra: { min: 8, max: 32 },
+};
+/** Límites de la primera versión, demasiado anchos. Si están guardados tal cual, se reemplazan por los sugeridos de hoy. */
+const LIMITES_ANTERIORES: Record<Exclude<Magnitud, null>, Par> = {
+  temperatura: { min: -5, max: 45 },
+  agua: { min: 100, max: 500 },
+  alimento: { min: 60, max: 160 },
+  postura: { min: null, max: 100 },
+  mortalidad: { min: null, max: 0.3 },
+};
+const PREDEFINIDAS = new Map([...RUTINA_CLASICA, ...BIBLIOTECA].map((b) => [b.nombre, b.campos]));
 
-export function limitesDe(campos: Campo[], i: number): { min: number | null; max: number | null; sugeridos: boolean } {
+/** Límites sugeridos para un dato: los de la tarea predefinida con ese nombre o, si no, según lo que mide. */
+export function limitesSugeridos(nombreTarea: string, campos: Campo[], i: number): Par {
   const c = campos[i];
-  if (c.min !== undefined || c.max !== undefined) return { min: c.min ?? null, max: c.max ?? null, sugeridos: false };
+  const pre = PREDEFINIDAS.get(nombreTarea)?.[i];
+  if (pre && pre.unidad === c.unidad && (pre.min !== undefined || pre.max !== undefined)) return { min: pre.min ?? null, max: pre.max ?? null };
   const m = magnitud(campos, i);
-  return m ? { ...LIMITES_SUGERIDOS[m], sugeridos: true } : { min: null, max: null, sugeridos: true };
+  if (m === 'temperatura') return /m[ií]n/i.test(c.etiqueta) ? TEMPERATURA.minima : /m[aá]x/i.test(c.etiqueta) ? TEMPERATURA.maxima : TEMPERATURA.otra;
+  return m ? LIMITES_SUGERIDOS[m] : { min: null, max: null };
+}
+
+/** Límites vigentes de un dato: los que guardó el supervisor o, si no tocó nada, los sugeridos. */
+export function limitesDe(nombreTarea: string, campos: Campo[], i: number): Par & { sugeridos: boolean } {
+  const c = campos[i];
+  const m = magnitud(campos, i);
+  const viejos = m ? LIMITES_ANTERIORES[m] : null;
+  const sinTocar = (c.min === undefined && c.max === undefined) || (viejos !== null && (c.min ?? null) === viejos.min && (c.max ?? null) === viejos.max);
+  if (!sinTocar) return { min: c.min ?? null, max: c.max ?? null, sugeridos: false };
+  return { ...limitesSugeridos(nombreTarea, campos, i), sugeridos: true };
 }
 
 /** En qué se expresa el resultado que ve el supervisor para un dato. */
@@ -352,10 +404,10 @@ export function avisosLogicos(p: { config: Config; indice: Indice; registro: Reg
     const ev = p.evs[i];
     const x = c.calculo !== 'valor' ? ev?.indicador : ev?.base;
     if (x == null) return;
-    const { min, max } = limitesDe(campos, i);
+    const { min, max } = limitesDe(nombre, campos, i);
     const texto = `${nombreDato(nombre, campos, i)}: ${num(x, decRes(c, x))} ${unidadResultado(c)}`;
-    if (min != null && x < min) out.push(`${texto}, bajo el mínimo lógico (${limite(min)})`);
-    else if (max != null && x > max) out.push(`${texto}, sobre el máximo lógico (${limite(max)})`);
+    if (min != null && x < min) out.push(`${texto}, bajo el límite de ${limite(min)}`);
+    else if (max != null && x > max) out.push(`${texto}, sobre el límite de ${limite(max)}`);
   });
 
   // Termómetro de mínima y máxima: la mínima no puede ser mayor que la máxima.
@@ -387,7 +439,7 @@ export function avisosLogicos(p: { config: Config; indice: Indice; registro: Reg
   if (campos.some((_, i) => ['agua', 'alimento'].includes(magnitud(campos, i) ?? ''))) {
     const aa = aguaYAlimento(p.indice, r.fecha, r.galpon_id, r);
     if (aa && ((logica.ratioMin != null && aa.relacion < logica.ratioMin) || (logica.ratioMax != null && aa.relacion > logica.ratioMax))) {
-      out.push(`Relación agua/alimento: ${limite(aa.relacion)} L por kg, fuera de lo lógico (${logica.ratioMin != null ? limite(logica.ratioMin) : '0'} a ${logica.ratioMax != null ? limite(logica.ratioMax) : 'sin tope'})`);
+      out.push(`Relación agua/alimento: ${limite(aa.relacion)} L por kg, fuera de los límites (${logica.ratioMin != null ? limite(logica.ratioMin) : '0'} a ${logica.ratioMax != null ? limite(logica.ratioMax) : 'sin tope'})`);
     }
   }
   return out;

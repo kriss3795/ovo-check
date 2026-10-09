@@ -26,6 +26,8 @@ export interface Sync {
   error: string | null;
   /** El servidor no acepta más fotos por ahora (cupo lleno). */
   cupo: boolean;
+  /** Desde cuándo espera el dato más antiguo que sigue solo en este teléfono (ms), o null si no hay. */
+  masAntiguo: number | null;
   /** El servidor no está recibiendo registros: 'lleno' = sin espacio; 'tope' = el plantel llegó a su máximo diario. */
   freno: 'lleno' | 'tope' | null;
 }
@@ -88,7 +90,7 @@ let estado: Estado = {
   desvinculado: false,
   rolIngreso: null,
   plantelSugerido: null,
-  sync: { enLinea: navigator.onLine, ocupado: false, pendientes: 0, fotosPendientes: 0, ultima: null, error: null, cupo: false, freno: null },
+  sync: { enLinea: navigator.onLine, ocupado: false, pendientes: 0, fotosPendientes: 0, ultima: null, error: null, cupo: false, freno: null, masAntiguo: null },
   visitas: {},
   ruta: [],
   aviso: null,

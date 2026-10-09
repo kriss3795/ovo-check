@@ -121,6 +121,28 @@ Las tareas clásicas de postura vienen cargadas: temperatura mínima y máxima, 
 
 ---
 
+## Lote nuevo en un galpón
+
+Cuando sale un lote y entra otro no hay que eliminar el galpón ni crearlo de nuevo. En Ajustes > Galpones > el galpón > **Empezar un lote nuevo** se anota el nombre del lote y las aves alojadas, y desde ese día el galpón parte de cero: las aves, el lote y las comparaciones con el día anterior (lectura del medidor, aves vivas, cambios de consumo). Se puede dejar en descanso (vacío sanitario) hasta que lleguen las aves.
+
+**No se borra ningún registro.** Todo lo del lote anterior queda en Historial y en Descargar datos, cada registro con su lote.
+
+---
+
+## Avisos antes de que algo se pierda o se borre
+
+| Qué | Cómo avisa |
+|---|---|
+| Fotos por borrarse (a los 30 días) | Tarjeta en Hoy con botón para descargarlas, notificación los lunes, y un aviso dentro de cada registro cuando a su foto le quedan 7 días o menos |
+| Datos que llevan más de 6 horas guardados solo en un teléfono | Tarjeta roja en ese teléfono, también antes de entrar: "No borres la app ni los datos del navegador" |
+| Un teléfono sin conectarse hace más de un día y con registros sin enviar | Notificación diaria al supervisor, con el nombre de la persona y cuántos registros son |
+| Respaldo | Notificación al supervisor el primer día de cada mes para descargar sus datos |
+| Plantel abandonado (nunca registró nada y nadie lo abrió en meses) | Correo a sus supervisores 30 días antes de eliminarlo. Nunca se elimina sin ese aviso, y basta abrir la app para conservarlo |
+| Servidor o espacio de fotos lleno | Aviso en la app a operarios y supervisores; nada se pierde, todo espera en cada teléfono |
+| Eliminar plantel, galpón, tarea o persona, y desvincular un teléfono | Cada uno pide confirmar y dice qué se conserva |
+
+---
+
 ## Fotos: se guardan 30 días
 
 Las fotos se borran solas de la nube a los **30 días**. Los números y el historial no se borran nunca. Para conservar las fotos hay que descargarlas antes:
@@ -198,7 +220,7 @@ Límite conocido: el PIN del operario es de 4 números y se comprueba en el tel�
 - **Los indicadores usan las aves vivas que anota el operario.** Mientras no haya ninguna anotada se usa la ficha del galpón. Cada registro guarda con cuántas aves se calculó y de dónde salió ese número, así los indicadores antiguos no cambian después.
 - **El operario no recibe pistas.** No ve rangos, lecturas anteriores ni cálculos, así que no puede ajustar un número para que "calce". El supervisor compara contra sus propios criterios.
 - **Aves vivas y mortalidad.** En la tarea Mortalidad el operario cuenta las aves muertas y después anota las aves vivas que quedan. La app no calcula ni corrige nada: compara con las aves vivas anotadas la vez anterior menos las muertas de hoy y, si no calza, le llega una alerta al supervisor con la diferencia, para que pregunte. El operario no ve el número anterior ni la alerta. En planteles creados antes de este cambio se activa en Ajustes > Tareas > Mortalidad > **Pedir también las aves vivas**.
-- **Mediciones fuera de lo lógico.** En Ajustes > **Alertas de mediciones** el supervisor ve y ajusta los límites de cada dato. La app trae límites amplios para detectar errores y cosas raras, no metas productivas: temperatura entre -5 y 45 °C, agua entre 100 y 500 ml por ave, alimento entre 60 y 160 g por ave, postura sobre 100 %, mortalidad sobre 0,3 % del lote en un día, relación agua/alimento entre 1,2 y 3,5 L por kg, y cambio de más de 30 % de un día a otro en el consumo de agua o de alimento. También avisa siempre si la mínima es mayor que la máxima. La alerta llega con el número y la explicación. El operario no ve los límites ni recibe ningún aviso, y puede guardar igual.
+- **Mediciones fuera de los límites.** En Ajustes > **Alertas de mediciones** el supervisor ve y ajusta los límites de cada dato. Los sugeridos son de manejo para ponedoras en producción, puestos para enterarse a tiempo y no cuando ya es grave: temperatura mínima entre 5 y 26 °C y máxima entre 12 y 32 °C, agua entre 150 y 400 ml por ave, alimento entre 85 y 140 g por ave, postura sobre 100 %, mortalidad sobre 0,1 % del lote en un día, relación agua/alimento entre 1,5 y 3 L por kg, y cambio de más de 20 % de un día a otro en el consumo de agua o de alimento. También avisa siempre si la mínima es mayor que la máxima. Cada plantel los ajusta a su genética, su clima y su manejo; el botón **Usar los límites sugeridos** los repone. La alerta llega con el número y la explicación. El operario no ve los límites ni recibe ningún aviso, y puede guardar igual.
 - **Marcas para verificar.** Tarea de la tarde registrada en la mañana, registro lejos del galpón, tarea sin la foto pedida, tarea no realizada, reloj desajustado.
 - **Nunca bloquea al operario.** Lo dudoso se guarda igual y se marca para que el supervisor lo revise.
 
@@ -226,7 +248,7 @@ Si la base de datos gratuita de Supabase se pasa de su límite, Supabase la deja
 3. **Al 70 % del espacio** (de números o de fotos) se dejan de aceptar planteles nuevos. Los que ya existen siguen igual.
 4. **Si se acaba el espacio de fotos,** los números siguen llegando y las fotos esperan en cada teléfono hasta que se libere espacio (todos los días se borran las que cumplen 30 días). Un solo plantel no puede ocupar más de 300 MB ni más de 3.000 fotos.
 5. **Si se acaba el espacio de números** (450 MB, antes del límite real de 500), los registros nuevos esperan en cada teléfono, sin perderse, y se envían solos cuando hay espacio. Entrar, revisar y descargar siguen funcionando. Operarios y supervisores ven el aviso "El servidor está lleno".
-6. **Contra el abuso:** un plantel no puede enviar más de 2.500 registros en 24 horas ni registros inflados, y un plantel creado para probar que quedó abandonado se borra solo. Eso ocurre únicamente si nunca registró nada y nadie lo abrió en 180 días (ajuste `dias_abandono`). Un plantel con registros no se borra nunca por su cuenta, aunque sus galpones pasen meses en vacío sanitario.
+6. **Contra el abuso:** un plantel no puede enviar más de 2.500 registros en 24 horas ni registros inflados, y un plantel creado para probar que quedó abandonado se borra solo. Eso ocurre únicamente si nunca registró nada y nadie lo abrió en 180 días (ajuste `dias_abandono`). Un plantel con registros no se borra nunca por su cuenta, aunque sus galpones pasen meses en vacío sanitario. Antes de eliminar uno abandonado se le avisa por correo a sus supervisores con 30 días de anticipación.
 
 **Aviso por correo.** La tarea diaria mide el espacio y envía un correo a la cuenta de Gmail de la app cuando el uso pasa el 60 %, el 80 % y el 95 %, con el detalle y qué hacer. Para recibirlo además en otro correo, agrega en Vercel la variable `CORREO_DUENO` con esa dirección.
 

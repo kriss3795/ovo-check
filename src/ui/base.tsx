@@ -211,6 +211,31 @@ export function Huevo(p: { fraccion: number; estado?: string; size?: number }) {
   );
 }
 
+// ------------------------------------------------------------------ datos que solo están en este teléfono
+/** Aviso cuando hay datos esperando hace horas: mientras no se envíen, solo existen en este teléfono. */
+export function AvisoSinEnviar() {
+  const s = useEstado((e) => e.sync);
+  useEstado((e) => e.tic);
+  const total = s.pendientes + s.fotosPendientes;
+  if (!total || !s.masAntiguo || Date.now() - s.masAntiguo < 6 * 3600000 || s.freno) return null;
+  // Si solo esperan fotos porque el servidor no tiene espacio, ya hay otro aviso y no depende de este teléfono.
+  if (s.cupo && !s.pendientes) return null;
+  return (
+    <div className="tarjeta aviso-mal">
+      <p className="fuerte">
+        {total} {total === 1 ? 'dato lleva' : 'datos llevan'} {haceCuanto(s.masAntiguo).replace(/^hace /, '')} sin enviarse
+      </p>
+      <p className="chico">
+        Por ahora {total === 1 ? 'solo está guardado' : 'solo están guardados'} en este teléfono. Conéctalo a internet y deja la app abierta hasta
+        que diga "Todo enviado". No borres la app ni los datos del navegador, y no entres a otro plantel: {total === 1 ? 'se perdería' : 'se perderían'}.
+      </p>
+      <button className="boton chico" style={{ marginTop: 8 }} onClick={() => sincronizar(true)}>
+        Enviar ahora
+      </button>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ servidor sin espacio
 /** Aviso cuando el servidor no está recibiendo registros. Nada se pierde: todo espera en cada teléfono. */
 export function AvisoServidor() {

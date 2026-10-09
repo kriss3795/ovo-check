@@ -1,5 +1,5 @@
 // Exporta los registros a un archivo que abre en Excel (CSV con punto y coma).
-import { Indice, NOMBRE_BLOQUE, NOMBRE_FLAG, decimalesIndicador, flagsDe } from './logica';
+import { Indice, NOMBRE_BLOQUE, NOMBRE_FLAG, decimalesIndicador, flagsDe, reiniciosDe } from './logica';
 import { urlFoto } from './nube';
 import type { Config, RegistroLocal, Revision } from './tipos';
 import { fechaHora } from './util';
@@ -18,7 +18,7 @@ export function armarCsv(config: Config, registros: RegistroLocal[], revisiones:
   const galpon = new Map(config.galpones.map((g) => [g.id, g]));
   const persona = new Map(config.usuarios.map((u) => [u.id, u.nombre]));
   const rev = new Map(revisiones.map((v) => [v.registro_id, v]));
-  const indice = new Indice(registros);
+  const indice = new Indice(registros, reiniciosDe(config.galpones));
   const filas: unknown[][] = [
     [
       'Fecha', 'Hora (servidor)', 'Galpón', 'Lote', 'Aves', 'Bloque', 'Tarea', 'Dato', 'Valor', 'Unidad',

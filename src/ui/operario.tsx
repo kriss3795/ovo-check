@@ -5,19 +5,20 @@ import {
 import { abrirVisita, ahora, guardarRegistro, salir, visitaVigente, type FotoNueva } from '../lib/app';
 import { avisar, cerrarPantalla, ir, leerEstado, useEstado, volver } from '../lib/estado';
 import {
-  HORA_INICIO_TARDE, Indice, LIMITE_BLOQUE, NOMBRE_BLOQUE, avanceGalpon, avesPara, avisosLogicos, conjuntoRevisadas, cuadreAves, evaluarCampo, resumen, tareasDe,
+  HORA_INICIO_TARDE, Indice, reiniciosDe, LIMITE_BLOQUE, NOMBRE_BLOQUE, avanceGalpon, avesPara, avisosLogicos, conjuntoRevisadas, cuadreAves, evaluarCampo, resumen, tareasDe,
 } from '../lib/logica';
 import { CATEGORIAS_PROBLEMA, MOTIVOS_CORREGIR, MOTIVOS_OMITIR } from '../lib/plantillas';
 import type { Flag, Galpon, Registro, Tarea } from '../lib/tipos';
 import { distancia, fechaHora, fechaLarga, fechaLocal, hora, mayuscula, num, uid } from '../lib/util';
-import { AvisoServidor, Barra, Confirmado, Envio, FotoBlob, Hoja, Huevo, IconoTarea, Teclado, aNumero, conMiles, useAtras } from './base';
+import { AvisoServidor, AvisoSinEnviar, Barra, Confirmado, Envio, FotoBlob, Hoja, Huevo, IconoTarea, Teclado, aNumero, conMiles, useAtras } from './base';
 import { Camara } from './captura';
 import { TarjetaAvisos } from './avisos';
 import { activarAvisos, desactivarAvisos } from '../lib/avisos';
 
 export function useIndice() {
   const registros = useEstado((e) => e.registros);
-  return useMemo(() => new Indice(registros), [registros]);
+  const galpones = useEstado((e) => e.config?.galpones);
+  return useMemo(() => new Indice(registros, reiniciosDe(galpones)), [registros, galpones]);
 }
 
 const TEXTO_ESTADO: Record<string, { texto: string; clase: string }> = {
@@ -89,6 +90,7 @@ export function OpInicio({ embebido }: { embebido?: boolean }) {
       <div className="contenido">
         {!embebido && <h2 className="titulo">{mayuscula(fechaLarga(hoy))}</h2>}
         {!embebido && <AvisoServidor />}
+        {!embebido && <AvisoSinEnviar />}
         {!embebido && <TarjetaAvisos />}
         {!embebido && galpones.length > 1 && <p className="suave">Toca el galpón donde estás. Puedes cambiar de galpón cuando quieras.</p>}
         {galpones.length === 0 && <div className="tarjeta suave">No hay galpones en producción. El supervisor los activa en Ajustes.</div>}
@@ -399,7 +401,8 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
 
   if (!galpon || !tarea) return <Falta />;
 
-  const valores = tarea.campos.map((_, i) => aNumero(textos[i] ?? ''));
+  // En un contador, no tocar nada es contar cero (no "sin dato").
+  const valores = tarea.campos.map((_, i) => aNumero(textos[i] ?? '') ?? (tarea.tipo === 'contador' && i === 0 ? 0 : null));
   const previo = indice.anterior(fecha, galpon.id, tarea.id);
   // El cálculo se guarda para el supervisor; al operario no se le muestra ningún valor de referencia.
   // Las aves con que se calculan los indicadores son las últimas aves vivas anotadas; si no hay, las de la ficha.
