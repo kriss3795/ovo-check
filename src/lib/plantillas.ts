@@ -12,6 +12,9 @@ const campo = (c: Partial<Campo> & { etiqueta: string }): Campo => ({
   ...c,
 });
 
+/** Aves vivas del galpón, que el operario anota cada día después de contar las muertas. */
+export const campoAvesVivas = (): Campo => campo({ etiqueta: 'Aves vivas', unidad: 'aves', saldo: true });
+
 const TODOS = [0, 1, 2, 3, 4, 5, 6];
 
 /** Rutina clásica de un galpón de postura. Es la que se carga al crear la granja. */
@@ -47,8 +50,8 @@ export const RUTINA_CLASICA: Base[] = [
     nombre: 'Mortalidad',
     icono: 'ave',
     tipo: 'contador',
-    ayuda: 'Cuenta las aves muertas retiradas hoy. Si no hay, deja 0.',
-    campos: [campo({ etiqueta: 'Aves muertas', unidad: 'aves', calculo: 'pct', indicador: '% del lote' })],
+    ayuda: 'Cuenta las aves muertas retiradas hoy. Si no hay, deja 0. Después anota las aves vivas que quedan.',
+    campos: [campo({ etiqueta: 'Aves muertas', unidad: 'aves', calculo: 'pct', indicador: '% del lote' }), campoAvesVivas()],
     foto: 'obligatoria',
     fotoEtiquetas: ['Aves retiradas'],
     bloque: 'manana',

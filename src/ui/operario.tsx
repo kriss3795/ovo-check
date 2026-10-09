@@ -5,7 +5,7 @@ import {
 import { abrirVisita, ahora, guardarRegistro, salir, visitaVigente, type FotoNueva } from '../lib/app';
 import { avisar, cerrarPantalla, ir, leerEstado, useEstado, volver } from '../lib/estado';
 import {
-  HORA_INICIO_TARDE, Indice, LIMITE_BLOQUE, NOMBRE_BLOQUE, avanceGalpon, conjuntoRevisadas, evaluarCampo, resumen, tareasDe,
+  HORA_INICIO_TARDE, Indice, LIMITE_BLOQUE, NOMBRE_BLOQUE, avanceGalpon, conjuntoRevisadas, cuadreAves, evaluarCampo, resumen, tareasDe,
 } from '../lib/logica';
 import { CATEGORIAS_PROBLEMA, MOTIVOS_CORREGIR, MOTIVOS_OMITIR } from '../lib/plantillas';
 import type { Flag, Galpon, Registro, Tarea } from '../lib/tipos';
@@ -419,6 +419,9 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
     const evs = tarea.campos.map((_, i) => evaluar(i));
     const conValores = !omitida && !anulado && (tarea.tipo === 'numero' || tarea.tipo === 'contador');
     if (conValores && evs.some((e) => e.retrocede)) flags.push('retrocede');
+    // Aves vivas que no calzan con las de la vez anterior menos las muertas de hoy: se marca para el supervisor.
+    // Al operario no se le dice nada ni se le muestra el número anterior.
+    if (conValores && (cuadreAves(tarea.campos, valores, previo)?.diferencia ?? 0) !== 0) flags.push('no_calza');
     const estaOk = extra.ok !== undefined ? extra.ok : ok;
     if (estaOk === false) flags.push('problema');
     if (omitida) flags.push('omitida');
@@ -706,7 +709,7 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
                   <span className={`numero${textos[0] ? '' : ' vacio'}`}>{conMiles(textos[0] || '0')}</span>
                   <span className="unidad">{c.unidad}</span>
                 </div>
-                <Teclado valor={textos[0] ?? ''} largo={6} alCambiar={(v) => setTextos([v])} />
+                <Teclado valor={textos[0] ?? ''} largo={6} alCambiar={(v) => setTextos((t) => [v, ...t.slice(1)])} />
               </>
             ) : (
               <>
@@ -730,8 +733,12 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
           {enlaceOmitir}
         </div>
         <div className="pie">
-          <button className="boton primario grande" onClick={seguirTrasNumeros}>
-            {n > 0 && tarea.foto !== 'no' && !sinFotosNuevas && !fotosTomadas.length ? 'Seguir a la foto' : `Guardar ${n} ${c.unidad}`}
+          <button className="boton primario grande" onClick={() => (tarea.campos.length > 1 ? avanzar({ t: 'numero', i: 1 }) : seguirTrasNumeros())}>
+            {tarea.campos.length > 1
+              ? `Seguir con ${tarea.campos[1].etiqueta.toLowerCase()}`
+              : n > 0 && tarea.foto !== 'no' && !sinFotosNuevas && !fotosTomadas.length
+                ? 'Seguir a la foto'
+                : `Guardar ${n} ${c.unidad}`}
           </button>
         </div>
         {visor}
@@ -752,7 +759,7 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
         {tarea.campos.length > 1 && (
           <div className="segmentos" role="tablist">
             {tarea.campos.map((x, k) => (
-              <button key={k} aria-pressed={k === i} onClick={() => k !== i && (k < i || valores[i] !== null) && setPaso({ t: 'numero', i: k })}>
+              <button key={k} aria-pressed={k === i} onClick={() => k !== i && (k < i || valores[i] !== null) && setPaso(tarea.tipo === 'contador' && k === 0 ? { t: 'contador' } : { t: 'numero', i: k })}>
                 {x.etiqueta}
                 {valores[k] !== null && k !== i ? `: ${num(valores[k], x.decimales)}` : ''}
               </button>
@@ -795,7 +802,11 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
       </div>
       <div className="pie">
         <button className="boton primario grande" disabled={!hayValor} onClick={() => (ultimo ? seguirTrasNumeros() : avanzar({ t: 'numero', i: i + 1 }))}>
-          {ultimo ? 'Guardar' : `Seguir con ${tarea.campos[i + 1].etiqueta.toLowerCase()}`}
+          {!ultimo
+            ? `Seguir con ${tarea.campos[i + 1].etiqueta.toLowerCase()}`
+            : tarea.tipo === 'contador' && (valores[0] ?? 0) > 0 && tarea.foto !== 'no' && !sinFotosNuevas && !fotosTomadas.length
+              ? 'Seguir a la foto'
+              : 'Guardar'}
         </button>
       </div>
       {visor}

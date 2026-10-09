@@ -6,7 +6,7 @@ import { diaSemana, diasEntre, fechaLocal, num } from './util';
 export const LIMITE_BLOQUE = { manana: 13, tarde: 20 } as const;
 export const NOMBRE_BLOQUE = { manana: 'Mañana', tarde: 'Tarde' } as const;
 
-export const FLAGS_CRITICOS: Flag[] = ['problema', 'retrocede'];
+export const FLAGS_CRITICOS: Flag[] = ['problema', 'retrocede', 'no_calza'];
 export const FLAGS_CONFIANZA: Flag[] = ['lejos', 'sin_foto', 'omitida', 'temprano'];
 /** Antes de esta hora, una tarea de la tarde se considera registrada antes de tiempo. */
 export const HORA_INICIO_TARDE = 12;
@@ -14,6 +14,7 @@ export const HORA_INICIO_TARDE = 12;
 export const NOMBRE_FLAG: Record<Flag | 'reloj', string> = {
   problema: 'Problema informado',
   retrocede: 'Lectura menor que la anterior',
+  no_calza: 'Las aves vivas no calzan',
   lejos: 'Lejos del galpón',
   sin_foto: 'Sin foto',
   omitida: 'No se hizo',
@@ -182,6 +183,35 @@ export function evaluarCampo(
   if (campo.calculo === 'por_ave') ev.indicador = aves ? (ev.base * 1000) / aves : null;
   if (campo.calculo === 'pct') ev.indicador = aves ? (ev.base * 100) / aves : null;
   return ev;
+}
+
+export interface Cuadre {
+  /** Posición del dato "aves vivas" dentro de la tarea. */
+  i: number;
+  /** Aves vivas anotadas la vez anterior, y qué día fue. */
+  antes: number;
+  fechaAntes: string;
+  /** Aves muertas anotadas ahora. */
+  bajas: number;
+  anotado: number;
+  esperado: number;
+  /** Lo anotado menos lo esperado: negativo = faltan aves; positivo = sobran. */
+  diferencia: number;
+}
+
+/**
+ * Compara las aves vivas anotadas con las de la vez anterior menos las muertas de hoy.
+ * No corrige ni calcula nada por el operario: solo sirve para avisarle al supervisor cuando no calza.
+ */
+export function cuadreAves(campos: Campo[], valores: (number | null)[], previo: Registro | null): Cuadre | null {
+  const i = campos.findIndex((c) => c.saldo);
+  if (i < 1 || !previo || !previo.tarea?.campos?.[i]?.saldo) return null;
+  const antes = previo.valores[i];
+  const anotado = valores[i];
+  const bajas = valores[0];
+  if (antes == null || anotado == null || bajas == null) return null;
+  const esperado = antes - bajas;
+  return { i, antes, fechaAntes: previo.fecha, bajas, anotado, esperado, diferencia: anotado - esperado };
 }
 
 export const decimalesIndicador = (c: Campo, x: number) => (c.calculo === 'pct' ? (Math.abs(x) < 1 ? 2 : 1) : 0);

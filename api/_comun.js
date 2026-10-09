@@ -79,6 +79,9 @@ export function textoDeRegistro(r) {
   if ((r.flags ?? []).includes('retrocede')) {
     return { titulo: `${lugar}: revisar ${r.tarea}`, texto: `La lectura es menor que la anterior. Registró ${r.persona}.` };
   }
+  if ((r.flags ?? []).includes('no_calza')) {
+    return { titulo: `${lugar}: revisar ${r.tarea}`, texto: `Las aves vivas anotadas no calzan con las del registro anterior. Registró ${r.persona}.` };
+  }
   return { titulo: `${lugar}: problema en ${r.tarea}`, texto: `${r.nota || 'Sin descripción'}. Informó ${r.persona}.` };
 }
 

@@ -52,6 +52,11 @@ export interface Campo {
   calculo: Calculo;
   /** Nombre del indicador calculado (ml por ave, % de postura…). Solo lo ve el supervisor. */
   indicador: string;
+  /**
+   * Aves vivas que anota el operario después de contar las muertas. La app no las calcula ni las corrige: solo
+   * compara con lo anotado la vez anterior y, si no calza, se lo marca al supervisor para que pregunte.
+   */
+  saldo?: boolean;
 }
 
 export interface Tarea {
@@ -98,6 +103,7 @@ export interface FotoRef {
 export type Flag =
   | 'problema' // el operario marcó o reportó un problema
   | 'retrocede' // medidor acumulativo con lectura menor que la anterior
+  | 'no_calza' // las aves vivas anotadas no calzan con las de la vez anterior menos las muertas de hoy
   | 'lejos' // GPS lejos del galpón
   | 'sin_foto' // la tarea pedía foto y no se pudo tomar
   | 'omitida' // el operario indicó que hoy no se pudo hacer

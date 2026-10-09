@@ -109,7 +109,7 @@ Las tareas clásicas de postura vienen cargadas: temperatura mínima y máxima, 
 **Supervisor.**
 - **Hoy, por galpón:** avance, alertas y atrasos de cada galpón, y el detalle de cada tarea con su foto.
 - **Hoy, por persona:** cuántas tareas lleva cada operario en los galpones a su cargo, cuáles le faltan y cuáles están atrasadas, y todo lo que registró.
-- **Alertas:** problemas informados y lecturas de medidor menores que la anterior, para marcarlas como revisadas.
+- **Alertas:** problemas informados, lecturas de medidor menores que la anterior y aves vivas que no calzan con la mortalidad, para marcarlas como revisadas.
 - **Historial:** cualquier día anterior, y un resumen por tarea (fechas por galpón) con los indicadores calculados: consumo del día, ml por ave, g por ave, % de postura.
 - **Descargar datos:** todos los registros en un archivo que abre en Excel.
 - **Descargar fotos:** un archivo .zip con las fotos, ordenadas por día y galpón.
@@ -192,6 +192,7 @@ Límite conocido: el PIN del operario es de 4 números y se comprueba en el tel�
 - **Nada se edita ni se borra.** Una corrección crea una versión nueva firmada y con motivo; la anterior queda a la vista. El supervisor puede corregir o anular, y también queda firmado; lo anulado sigue a la vista con su motivo.
 - **Cada registro guarda las aves y el lote de ese día,** así los indicadores antiguos no cambian cuando el supervisor actualiza el galpón.
 - **El operario no recibe pistas.** No ve rangos, lecturas anteriores ni cálculos, así que no puede ajustar un número para que "calce". El supervisor compara contra sus propios criterios.
+- **Aves vivas y mortalidad.** En la tarea Mortalidad el operario cuenta las aves muertas y después anota las aves vivas que quedan. La app no calcula ni corrige nada: compara con las aves vivas anotadas la vez anterior menos las muertas de hoy y, si no calza, le llega una alerta al supervisor con la diferencia, para que pregunte. El operario no ve el número anterior ni la alerta. En planteles creados antes de este cambio se activa en Ajustes > Tareas > Mortalidad > **Pedir también las aves vivas**.
 - **Marcas para verificar.** Tarea de la tarde registrada en la mañana, registro lejos del galpón, tarea sin la foto pedida, tarea no realizada, reloj desajustado.
 - **Nunca bloquea al operario.** Lo dudoso se guarda igual y se marca para que el supervisor lo revise.
 
@@ -219,7 +220,7 @@ Si la base de datos gratuita de Supabase se pasa de su límite, Supabase la deja
 3. **Al 70 % del espacio** (de números o de fotos) se dejan de aceptar planteles nuevos. Los que ya existen siguen igual.
 4. **Si se acaba el espacio de fotos,** los números siguen llegando y las fotos esperan en cada teléfono hasta que se libere espacio (todos los días se borran las que cumplen 30 días). Un solo plantel no puede ocupar más de 300 MB ni más de 3.000 fotos.
 5. **Si se acaba el espacio de números** (450 MB, antes del límite real de 500), los registros nuevos esperan en cada teléfono, sin perderse, y se envían solos cuando hay espacio. Entrar, revisar y descargar siguen funcionando. Operarios y supervisores ven el aviso "El servidor está lleno".
-6. **Contra el abuso:** un plantel no puede enviar más de 2.500 registros en 24 horas ni registros inflados, y un plantel creado para probar que quedó abandonado (ningún registro y ningún teléfono abierto en 60 días) se borra solo.
+6. **Contra el abuso:** un plantel no puede enviar más de 2.500 registros en 24 horas ni registros inflados, y un plantel creado para probar que quedó abandonado se borra solo. Eso ocurre únicamente si nunca registró nada y nadie lo abrió en 180 días (ajuste `dias_abandono`). Un plantel con registros no se borra nunca por su cuenta, aunque sus galpones pasen meses en vacío sanitario.
 
 **Aviso por correo.** La tarea diaria mide el espacio y envía un correo a la cuenta de Gmail de la app cuando el uso pasa el 60 %, el 80 % y el 95 %, con el detalle y qué hacer. Para recibirlo además en otro correo, agrega en Vercel la variable `CORREO_DUENO` con esa dirección.
 
@@ -258,7 +259,7 @@ Si la base de datos gratuita de Supabase se pasa de su límite, Supabase la deja
 - **No lee los números de las fotos.** La planilla de pesaje llega como foto.
 - **Un teléfono trabaja con un plantel a la vez.**
 - **Si un teléfono se rompe antes de enviar,** se pierde lo que tenía pendiente.
-- **No descuenta sola la mortalidad.** El número de aves de cada galpón lo actualiza el supervisor en Ajustes > Galpones; de él dependen el % de postura y los consumos por ave.
+- **No calcula las aves por su cuenta.** El operario anota cada día las aves muertas y las aves vivas; la app solo compara y avisa si no calza. El número de aves de la ficha de cada galpón, del que dependen el % de postura y los consumos por ave, lo actualiza el supervisor en Ajustes > Galpones.
 
 ---
 

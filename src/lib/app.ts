@@ -3,6 +3,7 @@ import * as idb from './idb';
 import { ErrorNube, api, mensajeError, nubeConfigurada, rpc, subirFoto } from './nube';
 import { avisarProblema, conectarSesion, iniciarAvisos, refrescarAvisos, soltarAvisos } from './avisos';
 import { avisar, iniciarNavegacion, irRaiz, leerEstado, poner, ponerSync, type Visita } from './estado';
+import { FLAGS_CRITICOS } from './logica';
 import { RUTINA_CLASICA, tareaDesde } from './plantillas';
 import type { Config, FotoLocal, ItemCola, Registro, RegistroLocal, Revision, Usuario } from './tipos';
 import { fechaLocal, hashPin, sumarDias, uid, vibrar } from './util';
@@ -766,7 +767,7 @@ export async function sincronizar(forzar = false): Promise<void> {
         await idb.guardarVarios('registros', confirmados);
         mezclarRegistros(confirmados);
         // Un problema recién llegado se notifica de inmediato a los supervisores.
-        if (items.some((x) => x.registro.flags.some((f) => f === 'problema' || f === 'retrocede') && !x.registro.anulado)) avisarProblema();
+        if (items.some((x) => x.registro.flags.some((f) => FLAGS_CRITICOS.includes(f)) && !x.registro.anulado)) avisarProblema();
       }
       await desencolar(lote.filter((c) => !enEspera.has(c.ref)).map((c) => c.id));
       if (enEspera.size) {

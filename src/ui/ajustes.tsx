@@ -7,7 +7,7 @@ import { administrar, ahora, diagnostico, guardarConfig, salir } from '../lib/ap
 import { avisar, ir, useEstado, volver } from '../lib/estado';
 import { anotarPausa, cargaDiaria, NOMBRE_BLOQUE } from '../lib/logica';
 import { mensajeError } from '../lib/nube';
-import { BIBLIOTECA, RUTINA_CLASICA, campoVacio, tareaDesde, tareaVacia } from '../lib/plantillas';
+import { BIBLIOTECA, RUTINA_CLASICA, campoAvesVivas, campoVacio, tareaDesde, tareaVacia } from '../lib/plantillas';
 import type { Campo, Config, Galpon, Tarea, Usuario } from '../lib/tipos';
 import { DIAS_CORTOS, claveDebil, fechaLocal, haceCuanto, hashPin, iniciales, nombreDia, num, uid } from '../lib/util';
 import { Barra, Confirmar, Hoja, ICONOS, IconoTarea, Interruptor, aNumero } from './base';
@@ -319,7 +319,7 @@ function EditorTarea({ id }: { id: string }) {
 
   const cambiarTipo = (tipo: Tarea['tipo']) => {
     const c: Partial<Tarea> = { tipo };
-    if (tipo === 'numero' && t.campos.length === 0) c.campos = [campoVacio()];
+    if (tipo === 'numero') c.campos = t.campos.length === 0 ? [campoVacio()] : t.campos.filter((x) => !x.saldo);
     if (tipo === 'contador') c.campos = [{ ...(t.campos[0] ?? campoVacio()), decimales: 0, acumulativo: false }];
     if (tipo === 'check' || tipo === 'fotos') c.campos = [];
     if (tipo === 'fotos') c.foto = 'obligatoria';
@@ -398,16 +398,33 @@ function EditorTarea({ id }: { id: string }) {
 
         {conNumeros && (
           <>
-            {t.campos.map((c, i) => (
-              <EditorCampo
-                key={i}
-                titulo={t.campos.length > 1 ? `Dato ${i + 1}` : 'El dato'}
-                campo={c}
-                esContador={t.tipo === 'contador'}
-                alCambiar={(n) => set({ campos: t.campos.map((x, k) => (k === i ? n : x)) })}
-                quitar={t.campos.length > 1 ? () => set({ campos: t.campos.filter((_, k) => k !== i) }) : undefined}
-              />
-            ))}
+            {t.campos.map((c, i) =>
+              c.saldo ? null : (
+                <EditorCampo
+                  key={i}
+                  titulo={t.campos.filter((x) => !x.saldo).length > 1 ? `Dato ${i + 1}` : 'El dato'}
+                  campo={c}
+                  esContador={t.tipo === 'contador'}
+                  alCambiar={(n) => set({ campos: t.campos.map((x, k) => (k === i ? n : x)) })}
+                  quitar={t.tipo === 'numero' && t.campos.length > 1 ? () => set({ campos: t.campos.filter((_, k) => k !== i) }) : undefined}
+                />
+              ),
+            )}
+            {t.tipo === 'contador' && (
+              <div className="tarjeta">
+                <Interruptor
+                  activo={t.campos.some((x) => x.saldo)}
+                  alCambiar={(v) => set({ campos: v ? [t.campos[0] ?? campoVacio(), campoAvesVivas()] : t.campos.filter((x) => !x.saldo) })}
+                >
+                  <b>Pedir también las aves vivas</b>
+                  <br />
+                  <span className="chico suave">
+                    Después de contar, el operario anota cuántas aves vivas quedan. Si no calza con lo anotado la vez anterior menos las de hoy, te
+                    llega una alerta para que preguntes. El operario no ve el número anterior ni el aviso.
+                  </span>
+                </Interruptor>
+              </div>
+            )}
             {t.tipo === 'numero' && t.campos.length < 3 && (
               <button className="boton" onClick={() => set({ campos: [...t.campos, campoVacio()] })}>
                 <Plus size={20} aria-hidden /> Agregar otro dato a esta tarea

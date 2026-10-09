@@ -1,7 +1,7 @@
 // Tarea diaria (Vercel la ejecuta sola, ver vercel.json):
 //  1. Borra de la nube las fotos que ya cumplieron su plazo (30 días por defecto). Los números no se tocan.
 //  2. Los lunes recuerda a los supervisores que descarguen las fotos que se borrarán esa semana.
-//  3. Borra los planteles que alguien creó para probar y dejó abandonados (sin ningún registro ni uso en 60 días).
+//  3. Borra los planteles que alguien creó para probar y dejó abandonados (nunca registraron nada y nadie los abrió en 180 días).
 //  4. Mide el espacio ocupado y, si se está llenando, avisa por correo a quien administra la app.
 //  5. De paso mantiene despierto el proyecto gratuito de Supabase.
 import { USUARIO, correoListo, escapar, transporte } from './_correo.js';

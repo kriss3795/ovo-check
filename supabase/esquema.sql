@@ -19,6 +19,7 @@ insert into oc_ajustes (clave, valor) values
   ('max_mb_total', '900'),                       -- tope total de fotos (el plan gratis da 1.000 MB)
   ('max_mb_datos', '450'),                       -- tope de la base de datos (el plan gratis da 500 MB)
   ('max_registros_dia', '2500'),                 -- registros que un plantel puede enviar en 24 horas
+  ('dias_abandono', '180'),                      -- días sin ningún uso para dar por abandonado un plantel que nunca registró nada
   ('zona_horaria', 'America/Santiago')           -- para saber qué día es en la granja al enviar recordatorios
 on conflict (clave) do nothing;
 delete from oc_ajustes where clave = 'clave_activacion';
@@ -348,14 +349,24 @@ language sql security definer set search_path = public, pg_temp as $$
   select (oc__medir()).mb_datos >= coalesce(oc__ajuste('max_mb_datos')::numeric, 450);
 $$;
 
--- Galpones en producción de los planteles que se están usando (algún teléfono activo en los últimos 45 días).
+-- Días sin ningún uso para considerar abandonado un plantel (nunca menos de 60).
+create or replace function oc__dias_abandono() returns integer
+language sql stable security definer set search_path = public, pg_temp as $$
+  select greatest(coalesce(oc__ajuste('dias_abandono')::int, 180), 60);
+$$;
+
+-- Galpones en producción de los planteles que se están usando. Un plantel que ya tiene registros conserva su cupo
+-- aunque pase meses sin abrir la app (por ejemplo, durante un vacío sanitario largo). Uno que nunca registró nada
+-- solo cuenta mientras alguien lo abra (30 días).
 create or replace function oc__galpones_en_uso() returns integer
 language sql stable security definer set search_path = public, pg_temp as $$
   select coalesce(sum((select count(*) from jsonb_array_elements(g.config -> 'galpones') x
                        where coalesce((x ->> 'activo')::boolean, true))), 0)::int
   from oc_granjas g
   where jsonb_typeof(g.config -> 'galpones') = 'array'
-    and exists (select 1 from oc_dispositivos d where d.granja_id = g.id and d.visto > now() - interval '45 days');
+    and exists (select 1 from oc_dispositivos d where d.granja_id = g.id
+                and d.visto > now() - make_interval(days => case
+                  when exists (select 1 from oc_registros r where r.granja_id = g.id) then oc__dias_abandono() else 30 end));
 $$;
 
 -- ---------------------------------------------------------------------
@@ -838,7 +849,7 @@ begin
     insert into oc_registros (id, granja_id, dispositivo_id, fecha, galpon_id, datos, capturado, reloj_desfase_s, demora_s, critico)
       values ((r ->> 'id')::uuid, d.granja_id, d.id, (r ->> 'fecha')::date, r ->> 'galpon_id', r,
               cap, desfase, round(ms / 1000)::int,
-              coalesce(jsonb_typeof(r -> 'flags') = 'array' and (r -> 'flags') ?| array['problema', 'retrocede'], false)
+              coalesce(jsonb_typeof(r -> 'flags') = 'array' and (r -> 'flags') ?| array['problema', 'retrocede', 'no_calza'], false)
                 and not coalesce((r ->> 'anulado')::boolean, false))
       on conflict (id) do nothing;
     select * into fila from oc_registros where id = (r ->> 'id')::uuid and granja_id = d.granja_id;
@@ -1250,16 +1261,17 @@ begin
         from oc_granjas g order by 2 desc, 3 desc limit 5) t), '[]'::jsonb));
 end $$;
 
--- Limpieza diaria (solo el servidor de la app): planteles que alguien creó para probar y dejó botados
--- (ningún registro en toda su historia y ningún teléfono abierto en 60 días), para que no ocupen cupos.
+-- Limpieza diaria (solo el servidor de la app): planteles que alguien creó para probar y dejó botados, para que no
+-- ocupen cupos. Solo se borra un plantel que NUNCA registró nada y que nadie abrió en 180 días (ajuste dias_abandono).
+-- Un plantel con registros no se borra jamás por su cuenta, aunque sus galpones pasen meses vacíos.
 create or replace function oc_limpieza(p jsonb) returns jsonb
 language plpgsql security definer set search_path = public, pg_temp as $$
 declare n integer;
 begin
   delete from oc_granjas g
-    where g.creado < now() - interval '60 days'
+    where g.creado < now() - make_interval(days => oc__dias_abandono())
       and not exists (select 1 from oc_registros r where r.granja_id = g.id)
-      and not exists (select 1 from oc_dispositivos d where d.granja_id = g.id and d.visto > now() - interval '60 days');
+      and not exists (select 1 from oc_dispositivos d where d.granja_id = g.id and d.visto > now() - make_interval(days => oc__dias_abandono()));
   get diagnostics n = row_count;
   delete from oc_intentos where creado < now() - interval '2 days';
   return jsonb_build_object('planteles_abandonados', n);

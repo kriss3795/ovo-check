@@ -8,7 +8,7 @@ import { avisar, cambiarRuta, ir, useEstado } from '../lib/estado';
 import { armarCsv, entregarArchivo } from '../lib/exportar';
 import { anotarBajada, descargarFotos, fotosDe, fotosPorVencer, nombreFoto } from '../lib/fotos';
 import {
-  Indice, NOMBRE_BLOQUE, NOMBRE_FLAG, avanceGalpon, conjuntoRevisadas, decimalesIndicador, esCritico, esDudoso,
+  FLAGS_CRITICOS, Indice, NOMBRE_BLOQUE, NOMBRE_FLAG, avanceGalpon, conjuntoRevisadas, cuadreAves, decimalesIndicador, esCritico, esDudoso,
   evaluarCampo, flagsDe, indicadoresTexto, momento, relojMalo, resumen, tareasDe, vigenteEn,
 } from '../lib/logica';
 import { mensajeError } from '../lib/nube';
@@ -572,7 +572,7 @@ function FilaRegistro({ r, conGalpon = true, conFecha = true }: { r: RegistroLoc
         {flags.length > 0 && (
           <span className="etiquetas" style={{ marginTop: 6 }}>
             {flags.map((f) => (
-              <span key={f} className={`etiqueta ${['problema', 'retrocede'].includes(f) ? 'mal' : 'atencion'}`}>
+              <span key={f} className={`etiqueta ${(FLAGS_CRITICOS as string[]).includes(f) ? 'mal' : 'atencion'}`}>
                 {NOMBRE_FLAG[f]}
               </span>
             ))}
@@ -610,7 +610,7 @@ function Alertas() {
         <>
           {criticos.length === 0 && dudosos.length === 0 && (
             <Vacio titulo="Nada por revisar" icono={<Check size={40} color="var(--verde)" aria-hidden />}>
-              <p>Aquí aparecen los problemas que informan los operarios y las lecturas de medidor menores que la anterior.</p>
+              <p>Aquí aparecen los problemas que informan los operarios, las lecturas de medidor menores que la anterior y las aves vivas que no calzan.</p>
             </Vacio>
           )}
           {criticos.length > 0 && (
@@ -761,6 +761,27 @@ function HistorialDia({ config, fecha }: { config: Config; fecha: string }) {
   );
 }
 
+/** Para el supervisor: si las aves vivas anotadas calzan con las de la vez anterior menos las muertas de este registro. */
+function CuadreAves({ reg }: { reg: RegistroLocal }) {
+  const indice = useIndice();
+  const cuadre = cuadreAves(reg.tarea?.campos ?? [], reg.valores, indice.anterior(reg.fecha, reg.galpon_id, reg.tarea_id ?? ''));
+  const marcado = reg.flags.includes('no_calza');
+  if (!cuadre) {
+    return marcado ? <p className="chico">Al registrar, las aves vivas no calzaban con el registro anterior.</p> : null;
+  }
+  const d = cuadre.diferencia;
+  const antes = `${fechaRelativa(cuadre.fechaAntes)} se anotaron ${num(cuadre.antes)} aves vivas`;
+  if (d === 0) {
+    return <p className="chico suave">{marcado ? `Al registrar no calzaba; con la corrección posterior ahora calza (${antes.toLowerCase()}).` : `Calza: ${antes.toLowerCase()}.`}</p>;
+  }
+  return (
+    <p className="chico fuerte" style={{ color: 'var(--mal)' }}>
+      No calza. {antes}; con {num(cuadre.bajas)} {cuadre.bajas === 1 ? 'muerta' : 'muertas'} debían quedar {num(cuadre.esperado)} y se anotaron{' '}
+      {num(cuadre.anotado)}: {d < 0 ? `faltan ${num(-d)}` : `sobran ${num(d)}`}.
+    </p>
+  );
+}
+
 function ResumenTarea() {
   const config = useEstado((e) => e.config)!;
   const hoy = useEstado((e) => e.hoy);
@@ -802,7 +823,9 @@ function ResumenTarea() {
       // Registros anteriores a esta versión no guardaban las aves del día: se usa el indicador que se calculó entonces.
       x = !conIndicador ? ev.base : r.aves === undefined && r.indicadores?.[op.i] != null ? r.indicadores[op.i] : ev.indicador;
     } else if (conIndicador) x = r.indicadores?.[op.i];
-    return { texto: x === null || x === undefined ? '' : num(x, dec(x)), mal: false, id: r.id };
+    // Aves vivas: en rojo el día en que no calzan con las del registro anterior menos las muertas anotadas.
+    const cuadre = c.saldo ? cuadreAves(r.tarea?.campos ?? [], r.valores, indice.anterior(f, g.id, op.tarea.id)) : null;
+    return { texto: x === null || x === undefined ? '' : num(x, dec(x)), mal: Boolean(cuadre && cuadre.diferencia !== 0), id: r.id };
   };
 
   return (
@@ -1178,12 +1201,13 @@ export function RegistroDetalle({ id }: { id: string }) {
                   </div>
                 );
               })}
+              {esSup && <CuadreAves reg={reg} />}
             </div>
           )}
           {flags.length > 0 && (
             <div className="etiquetas" style={{ marginTop: 12 }}>
               {flags.map((f) => (
-                <span key={f} className={`etiqueta ${['problema', 'retrocede'].includes(f) ? 'mal' : 'atencion'}`}>
+                <span key={f} className={`etiqueta ${(FLAGS_CRITICOS as string[]).includes(f) ? 'mal' : 'atencion'}`}>
                   {NOMBRE_FLAG[f]}
                 </span>
               ))}
