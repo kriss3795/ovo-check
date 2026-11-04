@@ -149,6 +149,8 @@ export interface Config {
   proveedores?: Contacto[];
   insumos?: Insumo[];
   plan_sanitario?: PlanSanitario[];
+  /** Informe diario por correo al cierre del día (supervisores y correos extra, como gerencia). */
+  informe?: { activo: boolean; correos: string[] };
 }
 
 export interface Modulos {

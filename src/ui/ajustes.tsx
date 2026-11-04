@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   ArrowDown, ArrowUp, Bell, Check, ChevronRight, ClipboardList, Database, Images, KeyRound, LogOut, MapPin, Plus,
-  Printer, QrCode, RefreshCw, RotateCcw, ScanLine, Send, Settings2, Smartphone, Monitor, Trash2, TriangleAlert, Users, Warehouse, Wifi, X,
+  Boxes, Printer, QrCode, RefreshCw, RotateCcw, ScanLine, Send, Settings2, Smartphone, Monitor, Trash2, TriangleAlert, Users, Warehouse, Wifi, X,
 } from 'lucide-react';
 import { administrar, ahora, anonimizarPersona, diagnostico, guardarConfig, invitacionQR, salir } from '../lib/app';
 import { createPortal } from 'react-dom';
@@ -19,6 +19,8 @@ import { BotonInstalar, PaginaAvisos } from './avisos';
 import { HojaExportar, HojaFotos, marcarPaso } from './supervisor';
 import { armarCsv, entregarArchivo } from '../lib/exportar';
 import { Falta } from './operario';
+import { AjusteLista, AjusteModulos } from './ajustesGestion';
+import { AREAS_INFO, areasDisponibles, modulosDe, MODULOS_INFO } from '../lib/modulos';
 
 /** Guarda un cambio de configuración en el servidor y avisa el resultado. */
 function useGuardar() {
@@ -80,6 +82,7 @@ export function Ajustes() {
         {fila(<ClipboardList size={24} />, 'Tareas', `${config.tareas.filter((t) => t.activo).length} activas, cerca de ${carga.minutos} min de registro por galpón`, () => ir({ p: 'ajuste', cual: 'tareas' }))}
         {fila(<Warehouse size={24} />, 'Galpones', `${config.galpones.filter((g) => g.activo).length} en producción`, () => ir({ p: 'ajuste', cual: 'galpones' }))}
         {fila(<TriangleAlert size={24} />, 'Alertas de mediciones', 'Límites de cada dato. Solo los ves tú', () => ir({ p: 'ajuste', cual: 'logica' }))}
+        {fila(<Boxes size={24} />, 'Módulos, listas e informe', `${MODULOS_INFO.filter((x) => modulosDe(config)[x.id]).length} módulos activos`, () => ir({ p: 'ajuste', cual: 'modulos' }))}
         {fila(<Users size={24} />, 'Personas', `${operarios} ${operarios === 1 ? 'operario' : 'operarios'}`, () => ir({ p: 'ajuste', cual: 'personas' }))}
       </div>
       <p className="seccion">Teléfonos</p>
@@ -142,6 +145,10 @@ export function AjustePantalla(p: { cual: string; id?: string }) {
       return <CambiarClave alTerminar={volver} />;
     case 'diagnostico':
       return <Diagnostico />;
+    case 'modulos':
+      return <AjusteModulos />;
+    case 'lista':
+      return <AjusteLista cual={p.id as any} />;
     case 'avisos':
       return <PaginaAvisos />;
     default:
@@ -1137,6 +1144,36 @@ function HojaPersona({ u, esYo, cerrar }: { u: Usuario; esYo: boolean; cerrar: (
             <KeyRound size={20} aria-hidden /> Poner clave temporal (la olvidó)
           </button>
         )
+      )}
+      {u.rol === 'operario' && areasDisponibles(config).length > 1 && (
+        <div className="pila">
+          <p className="fuerte">Qué registra</p>
+          <div className="opciones">
+            {AREAS_INFO.filter((a) => areasDisponibles(config).includes(a.id)).map((a) => {
+              const yo = config.usuarios.find((y) => y.id === u.id) ?? u;
+              const actuales = yo.areas?.length ? yo.areas : ['galpones'];
+              const marcado = actuales.includes(a.id);
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  className="opcion"
+                  aria-pressed={marcado}
+                  disabled={ocupado || (marcado && actuales.length === 1)}
+                  onClick={() =>
+                    cambiar((x) => {
+                      const ya = x.areas?.length ? x.areas : ['galpones'];
+                      x.areas = (marcado ? ya.filter((y) => y !== a.id) : [...ya, a.id]) as typeof x.areas;
+                    }, marcado ? `${a.nombre}: ya no lo registra` : `${a.nombre}: ahora lo registra`)
+                  }
+                >
+                  {a.nombre}
+                </button>
+              );
+            })}
+          </div>
+          <p className="chico suave">En su teléfono ve solo estas áreas, con formularios simples y sin saldos ni cálculos.</p>
+        </div>
       )}
       {esYo ? (
         <p className="chico suave">Tu clave se cambia en Ajustes, Cambiar mi clave. Tu propio estado solo lo puede cambiar otro supervisor.</p>

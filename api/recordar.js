@@ -1,6 +1,7 @@
 // Recordatorio de tareas sin registrar. Vercel lo ejecuta dos veces al día (ver vercel.json):
 // después del mediodía para las tareas de la mañana y en la noche para las de la tarde.
 // Al supervisor le llega el resumen por galpón; a los encargados, que les quedan tareas.
+import { correoInforme } from './_informe.js';
 import { avisarPendientes, avisosListos, cronAutorizado, notificar, rpc, servidorListo, tocaTurno } from './_comun.js';
 
 const NOMBRE = { manana: 'de la mañana', tarde: 'de la tarde' };
@@ -65,7 +66,10 @@ export default async function handler(req, res) {
         });
       }
     }
-    return res.status(200).json({ ok: true, bloque, granjas: granjas?.length ?? 0, enviadas });
+    // Informe diario por correo a los supervisores y a la gerencia (al cierre del día).
+    let informes = 0;
+    if (bloque === 'tarde') informes = await correoInforme().catch((e) => (console.error('Informe diario', e?.message), 0));
+    return res.status(200).json({ ok: true, bloque, granjas: granjas?.length ?? 0, enviadas, informes });
   } catch (e) {
     return res.status(502).json({ error: String(e?.message ?? e) });
   }

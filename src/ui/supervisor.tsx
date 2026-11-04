@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ChartLine,
+  ChartLine, Boxes,
   Ban, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Download, History, House, MapPin, Pencil,
   Settings, ShieldAlert, Smartphone, TriangleAlert, CircleX, Images,
 } from 'lucide-react';
@@ -20,6 +20,8 @@ import { distancia, duracion, fechaCorta, fechaHora, fechaLarga, fechaRelativa, 
 import { AvisoServidor, AvisoSinEnviar, Barra, Envio, Foto, Hoja, Huevo, IconoTarea, Vacio, VisorFoto } from './base';
 import { Ajustes } from './ajustes';
 import { Produccion } from './produccion';
+import { Gestion } from './gestion';
+import { ES_GESTION, resumenGestion, tituloGestion } from '../lib/modulos';
 import { TarjetaAvisos } from './avisos';
 import { EtiquetaEstado, Falta, useIndice } from './operario';
 
@@ -51,6 +53,7 @@ const PESTANAS = [
   { id: 'hoy', nombre: 'Hoy', C: House },
   { id: 'alertas', nombre: 'Alertas', C: Bell },
   { id: 'produccion', nombre: 'Producción', C: ChartLine },
+  { id: 'gestion', nombre: 'Gestión', C: Boxes },
   { id: 'historial', nombre: 'Historial', C: History },
   { id: 'ajustes', nombre: 'Ajustes', C: Settings },
 ] as const;
@@ -76,6 +79,7 @@ export function Supervisor({ tab }: { tab: string }) {
           {tab === 'hoy' && <Hoy />}
           {tab === 'alertas' && <Alertas />}
           {tab === 'produccion' && <Produccion />}
+          {tab === 'gestion' && <Gestion />}
           {tab === 'historial' && <Historial />}
           {tab === 'ajustes' && <Ajustes />}
         </main>
@@ -1296,6 +1300,19 @@ export function RegistroDetalle({ id }: { id: string }) {
               <p className="subtitulo">No se hizo</p>
               <p>{reg.motivo}</p>
             </>
+          ) : ES_GESTION(reg) ? (
+            <>
+              <p className="subtitulo">{tituloGestion(config, reg)}</p>
+              <p style={{ fontSize: 18 }}>{resumenGestion(config, reg)}</p>
+              {reg.nota && <p className="suave">{reg.nota}</p>}
+              {esSup && (reg.avisos?.length ?? 0) > 0 && (
+                <ul className="lista-avisos">
+                  {reg.avisos!.map((a) => (
+                    <li key={a}>{a}</li>
+                  ))}
+                </ul>
+              )}
+            </>
           ) : reg.tipo === 'problema' ? (
             <p style={{ fontSize: 20, fontWeight: 600 }}>{reg.nota || 'Sin descripción'}</p>
           ) : reg.tarea?.tipo === 'check' ? (
@@ -1444,6 +1461,18 @@ export function RegistroDetalle({ id }: { id: string }) {
           )
         )}
 
+        {ES_GESTION(reg) && !reg.anulado && (esSup || (reg.fecha === hoy && reg.usuario_id === usuario.id)) && (
+          <div className="pila">
+            <button className="boton" onClick={() => ir({ p: 'form', tipo: reg.tipo, sub: (reg.detalle as any)?.sub, corrige: reg.id })}>
+              <Pencil size={20} aria-hidden /> Corregir este registro
+            </button>
+            {esSup && (
+              <button className="boton peligro-suave" onClick={() => ir({ p: 'form', tipo: reg.tipo, sub: (reg.detalle as any)?.sub, corrige: reg.id, anular: true })}>
+                <Ban size={20} aria-hidden /> Anular este registro
+              </button>
+            )}
+          </div>
+        )}
         {(puedeCorregir || (esSup && reg.tipo === 'tarea' && !reg.anulado)) && (
           <div className="pila">
             {puedeCorregir && (

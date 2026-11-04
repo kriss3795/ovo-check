@@ -1902,4 +1902,42 @@ begin
     'config', oc__config_para(g, true), 'clave_operarios', g.clave_operarios, 'registros', n);
 end $$;
 
+-- Informe diario por correo (al cierre del día): lo de hoy por galpón, para los supervisores y los correos extra que
+-- el plantel anotó (gerencia). Solo planteles reales con registros hoy y con el informe activado. (Solo el servidor.)
+create or replace function oc_informe_diario(p jsonb) returns jsonb
+language sql stable security definer set search_path = public, pg_temp as $$
+  with hoy as (select (now() at time zone coalesce(oc__ajuste('zona_horaria'), 'America/Santiago'))::date as d),
+  v as (
+    select r.granja_id, r.galpon_id, r.datos, r.critico from oc_registros r, hoy
+    where r.fecha = hoy.d and not coalesce((r.datos ->> 'anulado')::boolean, false)
+      and not exists (select 1 from oc_registros c where c.granja_id = r.granja_id and c.datos ->> 'corrige' = r.id::text)
+  ),
+  por_galpon as (
+    select granja_id, galpon_id,
+      max(datos ->> 'galpon_nombre') as nombre,
+      max(case when jsonb_typeof(datos -> 'aves') = 'number' then (datos ->> 'aves')::numeric end) as aves,
+      sum(case when datos -> 'tarea' -> 'campos' -> 0 ->> 'indicador' ilike '%postura%' and jsonb_typeof(datos -> 'valores' -> 0) = 'number'
+               then (datos -> 'valores' ->> 0)::numeric end) as huevos,
+      sum(case when datos -> 'tarea' -> 'campos' -> 0 ->> 'indicador' ilike '%del lote%' and jsonb_typeof(datos -> 'valores' -> 0) = 'number'
+               then (datos -> 'valores' ->> 0)::numeric end) as muertas,
+      max(case when datos -> 'tarea' -> 'campos' -> 0 ->> 'indicador' = 'ml por ave' and jsonb_typeof(datos -> 'indicadores' -> 0) = 'number'
+               then (datos -> 'indicadores' ->> 0)::numeric end) as ml,
+      max(case when datos -> 'tarea' -> 'campos' -> 0 ->> 'indicador' = 'g por ave' and jsonb_typeof(datos -> 'indicadores' -> 0) = 'number'
+               then (datos -> 'indicadores' ->> 0)::numeric end) as g,
+      count(*) filter (where critico)::int as alertas,
+      count(*)::int as registros
+    from v where datos ->> 'tipo' in ('tarea', 'problema') group by granja_id, galpon_id
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'granja', g.nombre, 'fecha', (select d from hoy),
+    'correos', (select coalesce(jsonb_agg(distinct x), '[]'::jsonb) from (
+        select lower(u ->> 'correo') as x from jsonb_array_elements(g.config -> 'usuarios') u
+          where u ->> 'rol' = 'supervisor' and coalesce((u ->> 'activo')::boolean, false) and coalesce(u ->> 'correo', '') like '%@%'
+        union select lower(trim(e)) from jsonb_array_elements_text(coalesce(g.config -> 'informe' -> 'correos', '[]'::jsonb)) e where e like '%@%') c),
+    'galpones', (select jsonb_agg(to_jsonb(pg) - 'granja_id' order by pg.nombre) from por_galpon pg where pg.granja_id = g.id))), '[]'::jsonb)
+  from oc_granjas g
+  where not oc__es_demo(g) and coalesce((g.config -> 'informe' ->> 'activo')::boolean, true)
+    and exists (select 1 from por_galpon pg where pg.granja_id = g.id);
+$$;
+
 select 'Ovo Check instalado' as resultado;

@@ -125,6 +125,29 @@ export function enEnvases(huevos: number, e: Envases): string {
 
 // ------------------------------------------------------------------ lotes
 export const lotesDe = (c: Config) => c.lotes ?? [];
+/**
+ * Lotes para el plan sanitario y las fichas: los creados en Gestión o, si no hay, uno por galpón con su fecha de
+ * nacimiento (id 'g:<galpón>'). Así el plan de vacunas funciona aunque el plantel no use el módulo de lotes.
+ */
+export function lotesEfectivos(c: Config): Lote[] {
+  const propios = lotesDe(c);
+  if (propios.length) return propios;
+  return c.galpones
+    .filter((g) => g.nacimiento)
+    .map((g) => ({
+      id: `g:${g.id}`,
+      nombre: g.lote || g.nombre,
+      linea: g.linea ?? '',
+      nacimiento: g.nacimiento ?? null,
+      ingreso: g.reinicio ?? g.desde ?? g.nacimiento!,
+      aves_iniciales: g.aves,
+      galpon_id: g.id,
+      etapa: g.tipo === 'recria' ? 'recria' : 'produccion',
+      estado: g.activo ? 'activo' : 'cerrado',
+      semana_cierre: null,
+    }));
+}
+export const loteIdDe = (g: Galpon) => g.lote_id ?? `g:${g.id}`;
 export const loteDeGalpon = (c: Config, g: Galpon | undefined) => (g?.lote_id ? lotesDe(c).find((l) => l.id === g.lote_id) : undefined);
 
 /** Semana de edad (la semana 1 son los días 0 a 6 de vida). */

@@ -2071,3 +2071,52 @@ table.datos td.falta {
     display: none !important;
   }
 }
+
+/* Gestión */
+.gestion {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.gestion-acciones {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.gestion-area {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gestion-area-titulo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 750;
+  font-size: 17px;
+  padding: 0 0 4px;
+  cursor: pointer;
+  color: var(--tinta);
+}
+.lista-avisos {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  color: var(--mal);
+}
+.mosaico-areas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.tarjeta-area {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 64px;
+  padding: 12px 14px;
+  font-size: 17px;
+  background: var(--blanco);
+  border: 1.5px solid var(--linea);
+  border-radius: var(--radio);
+  cursor: pointer;
+}
