@@ -28,6 +28,10 @@ export interface Galpon {
   /** Lote que está hoy en el galpón (ficha en Gestión, Lotes). */
   lote_id?: string | null;
   lote: string;
+  /** Línea genética del lote (id de la curva estándar, por ejemplo 'hyline_brown'). Sin definir = no se compara con curva. */
+  linea?: string | null;
+  /** Fecha de nacimiento del lote (AAAA-MM-DD): da la edad en semanas para comparar con la curva. */
+  nacimiento?: string | null;
   lat: number | null;
   lng: number | null;
   activo: boolean;

@@ -1,4 +1,5 @@
 // Reglas del día a día: qué tareas tocan, qué está hecho y qué se marca para el supervisor.
+import { avisosCurva } from './estandar';
 import type { Campo, Config, Flag, Galpon, Logica, Pausa, Registro, RegistroLocal, Revision, Tarea } from './tipos';
 import { tareaParaGalpon } from './modulos';
 import { BIBLIOTECA, RUTINA_CLASICA } from './plantillas';
@@ -370,6 +371,25 @@ const decRes = (c: Campo, x: number) => (c.calculo !== 'valor' ? decimalesIndica
 const limite = (n: number) => String(Math.round(n * 100) / 100).replace('.', ',');
 const nombreDato = (nombreTarea: string, campos: Campo[], i: number) => (campos.filter((c) => !c.saldo).length > 1 ? campos[i].etiqueta : nombreTarea);
 
+/** Los registros anteriores de la misma tarea en el mismo galpón, del más reciente al más antiguo (máximo `n`, hasta 10 días atrás). */
+export function historial(indice: Indice, r: Registro, n: number): Registro[] {
+  const out: Registro[] = [];
+  let fecha = r.fecha;
+  while (out.length < n) {
+    const x = indice.anterior(fecha, r.galpon_id, r.tarea_id ?? '');
+    if (!x || diasEntre(x.fecha, r.fecha) > 10) break;
+    out.push(x);
+    fecha = x.fecha;
+  }
+  return out;
+}
+
+const medianaDe = (xs: number[]) => {
+  const o = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(o.length / 2);
+  return o.length % 2 ? o[m] : (o[m - 1] + o[m]) / 2;
+};
+
 /** Número del día (no el del medidor): el consumo si es acumulativo, o lo anotado. */
 export function baseDe(indice: Indice, r: Registro, i: number): number | null {
   const c = r.tarea?.campos[i];
@@ -449,6 +469,56 @@ export function avisosLogicos(p: { config: Config; indice: Indice; registro: Reg
       }
     }
   });
+
+  // Lo que suele ser un error al anotar (no un cambio real): un dígito de más o de menos, o el mismo número copiado.
+  // Un problema real mueve varios datos a la vez y se mantiene; un error de digitación es uno solo y de golpe.
+  const previos = historial(p.indice, r, 7);
+  campos.forEach((c, i) => {
+    const m = magnitud(campos, i);
+    const hoy = p.evs[i]?.base;
+    if (hoy == null || c.saldo) return;
+    const antes = previos.map((x) => baseDe(p.indice, x, i)).filter((v): v is number => v != null && v > 0);
+    // Las aves muertas son pocas y varían mucho de un día a otro: ahí un salto no indica un error de digitación.
+    const mediana = antes.length >= 3 ? medianaDe(antes) : 0;
+    if (mediana >= 10 && hoy > 0 && m !== 'mortalidad' && m !== 'temperatura') {
+      const veces = hoy / mediana;
+      if (veces >= 5 || veces <= 0.2) {
+        out.push(`${nombreDato(nombre, campos, i)}: ${num(hoy, c.decimales)} ${c.acumulativo ? `${c.unidad} al día` : c.unidad}, muy ${veces >= 5 ? 'por sobre' : 'por debajo de'} lo habitual (${num(mediana, c.decimales)}). ¿Un dígito de más o de menos, o un punto en vez de una coma?`);
+        return;
+      }
+    }
+    // Huevos: el mismo número exacto cuatro registros seguidos casi nunca es real (el alimento sí puede ir en ración fija).
+    if (m === 'postura' && hoy > 0) {
+      const iguales = previos.slice(0, 3).filter((x) => x.valores[i] === r.valores[i]).length;
+      if (iguales === 3) out.push(`${nombreDato(nombre, campos, i)}: el mismo número (${num(hoy, c.decimales)}) cuatro registros seguidos. ¿Se está midiendo o se está copiando?`);
+    }
+  });
+
+  // Caída de la postura respecto del promedio de los días anteriores (señal temprana de enfermedad o de manejo).
+  campos.forEach((c, i) => {
+    if (magnitud(campos, i) !== 'postura') return;
+    const hoy = p.evs[i]?.indicador;
+    const antes = previos
+      .filter((x) => diasEntre(x.fecha, r.fecha) <= 4)
+      .slice(0, 3)
+      .map((x) => x.indicadores?.[i])
+      .filter((v): v is number => v != null);
+    if (hoy == null || antes.length < 2) return;
+    const prom = antes.reduce((a, b) => a + b, 0) / antes.length;
+    if (prom - hoy >= 3) out.push(`Postura ${num(hoy, 1)} %: bajó ${num(prom - hoy, 1)} puntos respecto del promedio de los días anteriores (${num(prom, 1)} %)`);
+  });
+
+  // Comparación con la curva de la línea genética del galpón.
+  const iPost = campos.findIndex((_, i) => magnitud(campos, i) === 'postura');
+  const iAlim = campos.findIndex((_, i) => magnitud(campos, i) === 'alimento');
+  out.push(
+    ...avisosCurva({
+      config: p.config,
+      registro: r,
+      postura: iPost >= 0 ? (p.evs[iPost]?.indicador ?? null) : null,
+      alimentoAve: iAlim >= 0 ? (p.evs[iAlim]?.indicador ?? null) : null,
+    }),
+  );
 
   // Relación entre el agua y el alimento del mismo día.
   if (campos.some((_, i) => ['agua', 'alimento'].includes(magnitud(campos, i) ?? ''))) {

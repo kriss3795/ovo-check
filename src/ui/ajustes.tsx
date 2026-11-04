@@ -6,6 +6,7 @@ import {
 import { administrar, ahora, diagnostico, guardarConfig, invitacionQR, salir } from '../lib/app';
 import { createPortal } from 'react-dom';
 import { CodigoQR, EscanerQR, codigoLegible, enlaceUnirse, leerQR } from './qr';
+import { LINEAS, edadSemanas, semanaTexto } from '../lib/estandar';
 import { avisar, ir, poner, useEstado, volver } from '../lib/estado';
 import { anotarPausa, cargaDiaria, limitesDe, limitesSugeridos, LOGICA_DEFECTO, logicaDe, NOMBRE_BLOQUE, unidadResultado } from '../lib/logica';
 import { mensajeError } from '../lib/nube';
@@ -616,6 +617,32 @@ function Galpones() {
   );
 }
 
+/** Línea genética y fecha de nacimiento: con eso se compara el galpón contra la curva de su genética. */
+function CamposGenetica(p: { linea: string; nacimiento: string; alCambiar: (c: { linea?: string; nacimiento?: string }) => void; hoy: string }) {
+  const edad = p.nacimiento ? edadSemanas({ nacimiento: p.nacimiento } as Galpon, p.hoy) : null;
+  return (
+    <>
+      <label className="campo">
+        <span>Línea genética</span>
+        <select className="entrada" value={p.linea} onChange={(e) => p.alCambiar({ linea: e.target.value })}>
+          <option value="">Otra, o no comparar con una curva</option>
+          {LINEAS.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.nombre}
+            </option>
+          ))}
+        </select>
+        <small>Con la línea y la edad, la app compara la postura, el alimento y los pesos con la curva de la guía genética y te avisa si se alejan.</small>
+      </label>
+      <label className="campo">
+        <span>Fecha de nacimiento del lote</span>
+        <input className="entrada" type="date" value={p.nacimiento} max={p.hoy} onChange={(e) => p.alCambiar({ nacimiento: e.target.value })} />
+        {edad != null && <small>Hoy va en la {semanaTexto(edad)} de vida.</small>}
+      </label>
+    </>
+  );
+}
+
 /**
  * Sale un lote y entra otro: el galpón parte de cero (aves, lote y comparaciones) sin eliminarlo.
  * No se borra ningún registro: lo del lote anterior queda en el historial y en las descargas, con su lote.
@@ -623,6 +650,7 @@ function Galpones() {
 function HojaLoteNuevo({ galpon, cerrar }: { galpon: Galpon; cerrar: () => void }) {
   const [lote, setLote] = useState('');
   const [aves, setAves] = useState('');
+  const [gen, setGen] = useState({ linea: galpon.linea ?? '', nacimiento: '' });
   const [descanso, setDescanso] = useState(false);
   const { ocupado, guardar } = useGuardar();
   const hoy = fechaLocal(ahora());
@@ -631,7 +659,11 @@ function HojaLoteNuevo({ galpon, cerrar }: { galpon: Galpon; cerrar: () => void 
       const i = c.galpones.findIndex((x) => x.id === galpon.id);
       if (i < 0) return;
       const antes = c.galpones[i];
-      c.galpones[i] = anotarPausa({ ...antes, lote: lote.trim(), aves: aNumero(aves), reinicio: hoy, activo: !descanso }, antes, hoy);
+      c.galpones[i] = anotarPausa(
+        { ...antes, lote: lote.trim(), aves: aNumero(aves), reinicio: hoy, activo: !descanso, linea: gen.linea || null, nacimiento: gen.nacimiento || null },
+        antes,
+        hoy,
+      );
     }, `${galpon.nombre} empieza un lote nuevo`);
     if (ok) {
       cerrar();
@@ -656,6 +688,7 @@ function HojaLoteNuevo({ galpon, cerrar }: { galpon: Galpon; cerrar: () => void 
         <input className="entrada" inputMode="numeric" value={aves} onChange={(e) => setAves(e.target.value.replace(/[^\d.]/g, ''))} placeholder="Por ejemplo: 12000" />
         <small>Si todavía no llegan, déjalo en blanco y anótalo después.</small>
       </label>
+      <CamposGenetica linea={gen.linea} nacimiento={gen.nacimiento} hoy={hoy} alCambiar={(c) => setGen((x) => ({ ...x, ...c }))} />
       <Interruptor activo={descanso} alCambiar={setDescanso}>
         <b>Dejarlo en descanso por ahora</b>
         <br />
@@ -730,6 +763,12 @@ function EditorGalpon({ id }: { id: string }) {
           <span>Lote (opcional)</span>
           <input className="entrada" value={g.lote} onChange={(e) => set({ lote: e.target.value })} maxLength={30} placeholder="Por ejemplo: 24-A, Lohmann Brown" />
         </label>
+        <CamposGenetica
+          linea={g.linea ?? ''}
+          nacimiento={g.nacimiento ?? ''}
+          hoy={fechaLocal(ahora())}
+          alCambiar={(c) => set({ ...(c.linea !== undefined && { linea: c.linea || null }), ...(c.nacimiento !== undefined && { nacimiento: c.nacimiento || null }) })}
+        />
         <div className="tarjeta pila">
           <Interruptor activo={g.activo} alCambiar={(v) => set({ activo: v })}>
             <b>En producción</b>
