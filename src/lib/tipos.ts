@@ -86,6 +86,11 @@ export interface Campo {
    */
   min?: number | null;
   max?: number | null;
+  /**
+   * Pesaje de una muestra: el operario anota un número por ave (o por huevo) y el valor guardado es el promedio.
+   * Los números sueltos van en el registro (detalle.muestra) y con ellos el supervisor ve el CV y la uniformidad.
+   */
+  muestra?: boolean;
 }
 
 /** Alertas que cruzan datos. Solo las ve y las ajusta el supervisor. */

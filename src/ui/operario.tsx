@@ -11,7 +11,7 @@ import {
 } from '../lib/logica';
 import { CATEGORIAS_PROBLEMA, MOTIVOS_CORREGIR, MOTIVOS_OMITIR } from '../lib/plantillas';
 import type { Flag, Galpon, Registro, Tarea } from '../lib/tipos';
-import { distancia, fechaHora, fechaLarga, fechaLocal, hora, mayuscula, num, uid } from '../lib/util';
+import { distancia, fechaHora, fechaLarga, fechaLocal, hora, mayuscula, num, uid, vibrar } from '../lib/util';
 import { AvisoServidor, AvisoSinEnviar, Barra, Confirmado, Envio, FotoBlob, Hoja, Huevo, IconoTarea, Teclado, aNumero, conMiles, useAtras } from './base';
 import { Camara } from './captura';
 import { TarjetaAvisos } from './avisos';
@@ -420,6 +420,15 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
   };
   useAtras(retroceder, !guardado);
 
+  // Pesaje de una muestra: los números de cada ave (el valor del dato es su promedio).
+  const [muestra, setMuestra] = useState<number[]>(() => (original && !p.anular ? ((original.detalle as any)?.muestra ?? []) : []));
+  const [seguirLuego, setSeguirLuego] = useState(false);
+  const seguirRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (!seguirLuego) return;
+    setSeguirLuego(false);
+    seguirRef.current?.();
+  }, [seguirLuego]);
   if (!galpon || !tarea) return <Falta />;
 
   // En un contador, no tocar nada es contar cero (no "sin dato").
@@ -481,6 +490,7 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
       corrige: original?.id ?? null,
       motivo,
       ...extra,
+      ...(muestra.length && conValores ? { detalle: { muestra } } : {}),
     };
     // Mediciones fuera de lo lógico: se anotan para el supervisor. Al operario no se le avisa ni se le impide guardar.
     const avisos = conValores ? avisosLogicos({ config, indice, registro: reg, evs }) : [];
@@ -514,11 +524,13 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
   };
 
   const seguirTrasNumeros = () => {
+    seguirRef.current = null;
     // Contador: la foto se pide solo si hay algo que mostrar (más de cero).
     if (tarea.tipo === 'contador' && !fotosTomadas.length && tarea.foto !== 'no' && !sinFotosNuevas && (valores[0] ?? 0) > 0) return avanzar({ t: 'foto', i: 0 });
     guardar();
   };
 
+  seguirRef.current = seguirTrasNumeros;
   if (guardado) {
     return <Confirmado texto={p.anular ? 'Registro anulado' : 'Guardado'} detalle={detalleEnvio()} />;
   }
@@ -785,6 +797,72 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
   const c = tarea.campos[i];
   const ultimo = i === tarea.campos.length - 1;
   const hayValor = valores[i] !== null;
+  if (c.muestra) {
+    const actual = aNumero(textos[i] ?? '');
+    const anotar = () => {
+      if (actual == null || actual <= 0) return;
+      setMuestra((m) => [...m, actual]);
+      const copia = [...textos];
+      copia[i] = '';
+      setTextos(copia);
+      vibrar(25);
+    };
+    const terminar = () => {
+      const lista = actual != null && actual > 0 ? [...muestra, actual] : muestra;
+      setMuestra(lista);
+      const prom = lista.reduce((a, b) => a + b, 0) / lista.length;
+      const copia = [...textos];
+      copia[i] = String(Math.round(prom * 10 ** c.decimales) / 10 ** c.decimales).replace('.', ',');
+      setTextos(copia);
+      if (ultimo) setSeguirLuego(true);
+      else avanzar({ t: 'numero', i: i + 1 });
+    };
+    return (
+      <div className="pantalla">
+        {cabecera}
+        <div className="contenido" style={{ gap: 12 }}>
+          {tira || (tarea.ayuda && <p className="suave">{tarea.ayuda}</p>)}
+          <p className="fuerte" style={{ marginTop: 'auto' }}>
+            {c.etiqueta.replace(/cada /i, '')}: número {muestra.length + 1}
+          </p>
+          <div className="lectura">
+            <span className={`numero${textos[i] ? '' : ' vacio'}`}>{textos[i] ? conMiles(textos[i]) : '0'}</span>
+            <span className="unidad">{c.unidad}</span>
+          </div>
+          {muestra.length > 0 && (
+            <div className="muestra-lista" aria-label="Pesos anotados">
+              <span className="chico suave">
+                {muestra.length} {muestra.length === 1 ? 'anotado' : 'anotados'}:
+              </span>
+              <span className="muestra-numeros">{muestra.slice(-8).map((x, k) => <span key={k}>{num(x, c.decimales)}</span>)}</span>
+              <button type="button" className="enlace gris" onClick={() => setMuestra((m) => m.slice(0, -1))}>
+                Borrar el último
+              </button>
+            </div>
+          )}
+          <Teclado
+            valor={textos[i] ?? ''}
+            decimales={c.decimales}
+            alCambiar={(v) => {
+              const copia = [...textos];
+              copia[i] = v;
+              setTextos(copia);
+            }}
+          />
+          {i === 0 && !muestra.length && enlaceOmitir}
+        </div>
+        <div className="pie pie-doble">
+          <button className="boton grande" disabled={!muestra.length && actual == null} onClick={terminar}>
+            Terminar ({muestra.length + (actual != null && actual > 0 ? 1 : 0)})
+          </button>
+          <button className="boton primario grande" disabled={actual == null || actual <= 0} onClick={anotar}>
+            Anotar y seguir
+          </button>
+        </div>
+        {visor}
+      </div>
+    );
+  }
   return (
     <div className="pantalla">
       {cabecera}

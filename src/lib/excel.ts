@@ -3,15 +3,22 @@
 import { esNum, filasRegistros } from './exportar';
 import { diaGalpon } from './indicadores';
 import { FLAGS_CRITICOS, Indice, NOMBRE_FLAG, flagsDe, reiniciosDe } from './logica';
-import { lineaPorId } from './estandar';
+import { edadSemanas, estadisticaMuestra, estandarDe, lineaPorId } from './estandar';
+import { graficoPng } from './graficoPng';
+import { NOMBRE_TIPO, resumenGestion, tituloGestion } from './modulos';
 import { semanasGalpon } from './semanas';
 import type { Config, RegistroLocal, Revision } from './tipos';
 import { fechaHora, sumarDias } from './util';
 
+const fechaCortaLarga = (iso: string) => `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`;
+
 export const HOJAS = [
+  { id: 'resumen', nombre: 'Resumen y gráficos', detalle: 'Indicadores del período por galpón y gráficos semanales contra la guía genética' },
   { id: 'diario', nombre: 'Resumen diario', detalle: 'Un renglón por galpón y día: huevos, postura, mortalidad, agua, alimento y temperaturas' },
   { id: 'semanal', nombre: 'Semanal y guía', detalle: 'Por semana de vida, con la guía genética al lado' },
   { id: 'alertas', nombre: 'Alertas', detalle: 'Problemas y datos fuera de lo normal, con su motivo' },
+  { id: 'pesajes', nombre: 'Pesajes', detalle: 'Cada pesaje con promedio, CV y uniformidad' },
+  { id: 'gestion', nombre: 'Gestión', detalle: 'Sala de proceso, bodega, despachos, insumos y sanidad' },
   { id: 'registros', nombre: 'Registros', detalle: 'Cada dato anotado, con hora, operario y respaldo' },
 ] as const;
 export type Hoja = (typeof HOJAS)[number]['id'];
@@ -36,7 +43,60 @@ export async function armarExcel(p: {
   const { config, registros, revisiones, desde, hasta } = p;
   const indice = new Indice(registros, reiniciosDe(config.galpones));
   const galpones = config.galpones;
-  const libro: { data: Celda[][]; sheet: string; columns: { width: number }[]; stickyRowsCount: number }[] = [];
+  const libro: { data: Celda[][]; sheet: string; columns: { width: number }[]; stickyRowsCount: number; images?: unknown[]; showGridLines?: boolean }[] = [];
+
+  if (p.hojas.includes('resumen')) {
+    const data: Celda[][] = [
+      [{ value: config.granja.nombre, fontWeight: 'bold', fontSize: 18 } as Celda],
+      [t(`Informe del ${fechaCortaLarga(desde)} al ${fechaCortaLarga(hasta)}. Generado con Ovo Check el ${fechaHora(new Date().toISOString())}.`)],
+      [],
+      ['Galpón', 'Línea', 'Semana de vida', 'Aves', 'Huevos', 'Postura %', 'Guía %', 'Dif. guía', 'Muertas', 'Mort. %', 'Agua ml/ave', 'Alim. g/ave', 'Agua/alim.', 'Alertas'].map(titulo),
+    ];
+    const imagenes: unknown[] = [];
+    let fila = 0;
+    for (const g of galpones) {
+      const ss = semanasGalpon(indice, g, desde, hasta).filter((x) => x.diasConDatos);
+      if (!ss.length) continue;
+      const huevos = ss.reduce((a, x) => a + x.huevos, 0);
+      const muertas = ss.reduce((a, x) => a + x.muertas, 0);
+      const prom = (k: 'postura' | 'mlAve' | 'gAve' | 'relacion') => {
+        const v = ss.map((x) => x[k]).filter((z): z is number => z != null);
+        return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+      };
+      const guias = ss.map((x) => x.std?.postura).filter((z): z is number => z != null);
+      const guia = guias.length ? guias.reduce((a, b) => a + b, 0) / guias.length : null;
+      const postura = prom('postura');
+      const ultima = ss[ss.length - 1];
+      const d0 = diaGalpon(indice, g, hasta);
+      const alertas = registros.filter((r) => r.galpon_id === g.id && r.fecha >= desde && r.fecha <= hasta && !r.anulado && indice.esVigente(r) && (r.tipo === 'problema' || flagsDe(r).some((f) => (FLAGS_CRITICOS as string[]).includes(f)))).length;
+      data.push([
+        t(g.nombre), t(lineaPorId(g.linea)?.nombre ?? ''), n(g.nacimiento ? ultima.n : null), n(d0.aves ?? g.aves), n(huevos), n(postura, 1), n(guia, 1),
+        n(postura != null && guia != null ? postura - guia : null, 1), n(muertas), n(d0.aves ? (muertas * 100) / d0.aves : null, 2), n(prom('mlAve'), 0), n(prom('gAve'), 1),
+        n(prom('relacion'), 2), n(alertas),
+      ]);
+      // Gráficos de este galpón, uno al lado del otro, debajo de la tabla.
+      const etiquetas = ss.map((x) => (g.nacimiento ? `S${x.n}` : fechaCortaLarga(x.desde).slice(0, 5)));
+      const graficos = [
+        { titulo: `${g.nombre}: postura`, unidad: '% gallina-día', series: [{ nombre: 'Real', valores: ss.map((x) => x.postura), color: VERDE }, { nombre: 'Guía genética', valores: ss.map((x) => x.std?.postura ?? null), color: '#93a0a3', punteada: true }] },
+        { titulo: `${g.nombre}: alimento y agua`, unidad: 'g de alimento por ave al día', series: [{ nombre: 'Real', valores: ss.map((x) => x.gAve), color: '#c26a00' }, { nombre: 'Guía genética', valores: ss.map((x) => x.std?.alimento ?? null), color: '#93a0a3', punteada: true }] },
+        { titulo: `${g.nombre}: mortalidad acumulada`, unidad: '% del lote', series: [{ nombre: 'Real', valores: ss.map((x) => x.mortAcum), color: '#b42318' }, { nombre: 'Guía genética', valores: ss.map((x) => x.std?.mortAcum ?? null), color: '#93a0a3', punteada: true }] },
+      ];
+      for (let k = 0; k < graficos.length; k++) {
+        const png = await graficoPng({ ...graficos[k], etiquetas, ancho: 640, alto: 300 });
+        if (!png) continue;
+        imagenes.push({ content: png, contentType: 'image/png', width: 1280, height: 600, dpi: 192, anchor: { row: 0, column: 1 + k * 6 }, title: graficos[k].titulo, _fila: fila });
+      }
+      fila++;
+    }
+    // Los gráficos van debajo de la tabla: se reservan 17 filas por galpón.
+    const inicio = data.length + 2;
+    for (const im of imagenes as any[]) {
+      im.anchor.row = inicio + im._fila * 17;
+      delete im._fila;
+    }
+    for (let k = 0; k < fila * 17 + 2; k++) data.push([]);
+    libro.push({ data, sheet: 'Resumen', columns: [16, 22, 10, 10, 11, 10, 9, 9, 9, 9, 11, 11, 10, 9].map((w) => ({ width: w })), stickyRowsCount: 0, images: imagenes, showGridLines: false });
+  }
 
   if (p.hojas.includes('diario')) {
     const enc = ['Fecha', 'Galpón', 'Lote', 'Aves', 'Huevos', 'Postura %', 'Muertas', 'Mortalidad %', 'Agua L', 'Agua ml/ave', 'Alimento kg', 'Alimento g/ave', 'Agua/alimento L/kg', 'T° mín', 'T° máx'];
@@ -85,6 +145,33 @@ export async function armarExcel(p: {
       ]);
     }
     libro.push({ data, sheet: 'Alertas', columns: [12, 7, 12, 24, 26, 60, 18, 9, 11].map((w) => ({ width: w })), stickyRowsCount: 1 });
+  }
+
+  if (p.hojas.includes('pesajes')) {
+    const enc = ['Fecha', 'Galpón', 'Tarea', 'Aves pesadas', 'Promedio g', 'Guía g', 'CV %', 'Uniformidad %', 'Mínimo g', 'Máximo g', 'Registró'];
+    const data: Celda[][] = [enc.map(titulo)];
+    for (const r of registros) {
+      const m = (r.detalle as any)?.muestra as number[] | undefined;
+      if (!m?.length || r.anulado || !indice.esVigente(r) || r.fecha < desde || r.fecha > hasta) continue;
+      const e = estadisticaMuestra(m);
+      if (!e) continue;
+      const g = galpones.find((x) => x.id === r.galpon_id);
+      const edad = edadSemanas(g, r.fecha);
+      const std = g?.linea && edad != null ? estandarDe(g.linea, edad) : null;
+      data.push([fecha(r.fecha), t(r.galpon_nombre ?? g?.nombre), t(r.tarea?.nombre), n(e.n), n(e.promedio, 0), n(std?.pesoAve, 0), n(e.cv, 1), { ...(n(e.uniformidad, 0) as object), ...(e.uniformidad < 80 ? { color: '#B42318' } : {}) } as Celda, n(e.min), n(e.max), t(r.usuario_nombre)]);
+    }
+    libro.push({ data, sheet: 'Pesajes', columns: [12, 12, 18, 12, 12, 10, 8, 13, 10, 10, 18].map((w) => ({ width: w })), stickyRowsCount: 1 });
+  }
+
+  if (p.hojas.includes('gestion')) {
+    const enc = ['Fecha', 'Hora', 'Área', 'Movimiento', 'Detalle', 'Observaciones', 'Registró', 'Código'];
+    const data: Celda[][] = [enc.map(titulo)];
+    for (const r of indice.gestion) {
+      if (r.anulado || !indice.esVigente(r) || r.fecha < desde || r.fecha > hasta) continue;
+      data.push([fecha(r.fecha), t(fechaHora(r.capturado ?? r.capturado_dispositivo).slice(11, 16)), t(NOMBRE_TIPO[r.tipo] ?? r.tipo), t(tituloGestion(config, r)),
+        { value: resumenGestion(config, r), type: String, wrap: true }, t(r.nota), t(r.usuario_nombre), t(r.id.slice(0, 8).toUpperCase())]);
+    }
+    libro.push({ data, sheet: 'Gestión', columns: [12, 7, 16, 26, 50, 30, 18, 11].map((w) => ({ width: w })), stickyRowsCount: 1 });
   }
 
   if (p.hojas.includes('registros')) {

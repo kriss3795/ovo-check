@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, Download } from 'lucide-react';
 import { asegurarPeriodo, traerPeriodo } from '../lib/app';
 import { avisar, ir, useEstado } from '../lib/estado';
 import { edadSemanas, estandarDe, lineaPorId } from '../lib/estandar';
-import { armarExcel } from '../lib/excel';
+import { HOJAS, armarExcel } from '../lib/excel';
 import { entregarArchivo } from '../lib/exportar';
 import { diaGalpon } from '../lib/indicadores';
 import { FLAGS_CRITICOS } from '../lib/logica';
@@ -156,7 +156,7 @@ export function Planilla() {
     setBajando(true);
     try {
       const regs = await traerPeriodo(desde, hoy);
-      const blob = await armarExcel({ config, registros: regs, revisiones, desde, hasta: hoy, hojas: ['diario', 'semanal', 'alertas'] });
+      const blob = await armarExcel({ config, registros: regs, revisiones, desde, hasta: hoy, hojas: HOJAS.map((h) => h.id) });
       await entregarArchivo(`planilla-${config.granja.nombre.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${desde}-a-${hoy}.xlsx`, blob);
     } catch (e) {
       avisar(mensajeError(e), 'mal');
@@ -183,7 +183,7 @@ export function Planilla() {
       <header className="linea-h entre envolver">
         <h2 className="titulo">Planilla</h2>
         <button className="boton chico" onClick={descargar} disabled={bajando}>
-          <Download size={18} aria-hidden /> {bajando ? 'Preparando…' : 'Descargar Excel'}
+          <Download size={18} aria-hidden /> {bajando ? 'Preparando…' : 'Descargar Excel completo'}
         </button>
       </header>
 
