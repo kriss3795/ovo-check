@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Download } from 'lucide-react';
 import { asegurarPeriodo, traerPeriodo } from '../lib/app';
 import { avisar, ir, useEstado } from '../lib/estado';
-import { edadSemanas, estandarDe, lineaPorId } from '../lib/estandar';
+import { edadSemanas, estandarDe, nombreLinea, rubroDe } from '../lib/estandar';
 import { HOJAS, armarExcel } from '../lib/excel';
 import { entregarArchivo } from '../lib/exportar';
 import { diaGalpon } from '../lib/indicadores';
@@ -22,6 +22,7 @@ type Fila = {
   galpon: string;
   lote: string;
   semana: number | null;
+  enDias: boolean;
   aves: number | null;
   muertas: number | null;
   mort: number | null;
@@ -45,7 +46,7 @@ type Col = { id: keyof Fila; nombre: string; dec?: number; ancho?: number; texto
 const COLUMNAS: Col[] = [
   { id: 'fecha', nombre: 'Fecha', texto: true, ancho: 104 },
   { id: 'galpon', nombre: 'Galpón', texto: true, ancho: 110 },
-  { id: 'semana', nombre: 'Sem.', dec: 0, ancho: 56 },
+  { id: 'semana', nombre: 'Edad', dec: 0, ancho: 64 },
   { id: 'aves', nombre: 'Aves', dec: 0, suma: 'ultimo' },
   { id: 'muertas', nombre: 'Muertas', dec: 0, suma: 'suma', tono: (f) => (f.mort != null && f.mort > 0.1 ? 'mal' : undefined) },
   { id: 'mort', nombre: 'Mort. %', dec: 3, suma: 'prom', tono: (f) => (f.mort != null && f.mort > 0.1 ? 'mal' : undefined) },
@@ -97,7 +98,7 @@ export function Planilla() {
           if (!s.diasConDatos) continue;
           const alertas = contarAlertas(indice, g.id, s.desde, s.hasta);
           out.push({
-            clave: `${g.id}-${s.desde}`, fecha: s.desde, hasta: s.hasta, galponId: g.id, galpon: g.nombre, lote: g.lote, semana: g.nacimiento ? s.n : null,
+            clave: `${g.id}-${s.desde}`, fecha: s.desde, hasta: s.hasta, galponId: g.id, galpon: g.nombre, lote: g.lote, semana: g.nacimiento ? s.n : null, enDias: false,
             aves: null, muertas: s.muertas, mort: s.mortSemana, mortAcum: s.mortAcum, huevos: s.huevos || null, postura: s.postura, guia: s.std?.postura ?? null,
             dif: s.postura != null && s.std?.postura != null ? s.postura - s.std.postura : null, aguaL: null, ml: s.mlAve, alimKg: null, g: s.gAve,
             guiaG: s.std?.alimento ?? null, rel: s.relacion, tmin: null, tmax: null, alertas,
@@ -117,7 +118,7 @@ export function Planilla() {
         const edad = edadSemanas(g, f);
         const std = g.linea && edad != null ? estandarDe(g.linea, edad) : null;
         out.push({
-          clave: `${g.id}-${f}`, fecha: f, hasta: f, galponId: g.id, galpon: g.nombre, lote: g.lote, semana: edad != null ? Math.floor(edad) + 1 : null,
+          clave: `${g.id}-${f}`, fecha: f, hasta: f, galponId: g.id, galpon: g.nombre, lote: g.lote, enDias: rubroDe(g.linea) === 'engorda', semana: edad != null ? (rubroDe(g.linea) === 'engorda' ? Math.round(edad * 7) : Math.floor(edad) + 1) : null,
           aves: d.aves, muertas: d.muertas, mort: d.mortalidad, mortAcum: avesIni ? (acum * 100) / avesIni : null, huevos: d.huevos, postura: d.postura,
           guia: std?.postura ?? null, dif: d.postura != null && std?.postura != null ? d.postura - std.postura : null, aguaL: d.aguaL, ml: d.mlAve,
           alimKg: d.alimKg, g: d.gAve, guiaG: std?.alimento ?? null, rel: d.relacion, tmin: d.tmin, tmax: d.tmax, alertas: contarAlertas(indice, g.id, f, f),
@@ -195,7 +196,7 @@ export function Planilla() {
             {config.galpones.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.nombre}
-                {g.linea ? ` (${lineaPorId(g.linea)?.nombre})` : ''}
+                {g.linea ? ` (${nombreLinea(g.linea)})` : ''}
               </option>
             ))}
           </select>
@@ -245,7 +246,7 @@ export function Planilla() {
               <tr key={f.clave} onClick={() => vista === 'dia' && ir({ p: 'galpondia', id: f.galponId, fecha: f.fecha })}>
                 {columnas.map((c) => (
                   <td key={c.id} className={[c.texto ? 'texto' : '', c.tono?.(f) ?? ''].join(' ').trim() || undefined}>
-                    {c.id === 'fecha' ? fechaTexto(f) : fmt(c, f[c.id])}
+                    {c.id === 'fecha' ? fechaTexto(f) : c.id === 'semana' && f.semana != null ? (f.enDias ? `día ${f.semana}` : `sem. ${f.semana}`) : fmt(c, f[c.id])}
                   </td>
                 ))}
               </tr>
