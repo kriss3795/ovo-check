@@ -3,7 +3,7 @@
 import { esNum, filasRegistros } from './exportar';
 import { diaGalpon } from './indicadores';
 import { FLAGS_CRITICOS, Indice, NOMBRE_FLAG, flagsDe, reiniciosDe } from './logica';
-import { edadSemanas, estadisticaMuestra, estandarDe, lineaPorId } from './estandar';
+import { edadSemanas, estadisticaMuestra, estandarDe, nombreLinea } from './estandar';
 import { graficoPng } from './graficoPng';
 import { NOMBRE_TIPO, resumenGestion, tituloGestion } from './modulos';
 import { semanasGalpon } from './semanas';
@@ -70,7 +70,7 @@ export async function armarExcel(p: {
       const d0 = diaGalpon(indice, g, hasta);
       const alertas = registros.filter((r) => r.galpon_id === g.id && r.fecha >= desde && r.fecha <= hasta && !r.anulado && indice.esVigente(r) && (r.tipo === 'problema' || flagsDe(r).some((f) => (FLAGS_CRITICOS as string[]).includes(f)))).length;
       data.push([
-        t(g.nombre), t(lineaPorId(g.linea)?.nombre ?? ''), n(g.nacimiento ? ultima.n : null), n(d0.aves ?? g.aves), n(huevos), n(postura, 1), n(guia, 1),
+        t(g.nombre), t(nombreLinea(g.linea)), n(g.nacimiento ? ultima.n : null), n(d0.aves ?? g.aves), n(huevos), n(postura, 1), n(guia, 1),
         n(postura != null && guia != null ? postura - guia : null, 1), n(muertas), n(d0.aves ? (muertas * 100) / d0.aves : null, 2), n(prom('mlAve'), 0), n(prom('gAve'), 1),
         n(prom('relacion'), 2), n(alertas),
       ]);
@@ -118,7 +118,7 @@ export async function armarExcel(p: {
       for (const s of semanasGalpon(indice, g, desde, hasta)) {
         if (!s.diasConDatos) continue;
         data.push([
-          t(g.nombre), t(lineaPorId(g.linea)?.nombre ?? ''), n(s.n), fecha(s.desde), fecha(s.hasta), n(s.diasConDatos),
+          t(g.nombre), t(nombreLinea(g.linea)), n(s.n), fecha(s.desde), fecha(s.hasta), n(s.diasConDatos),
           n(s.postura, 1), n(s.std?.postura, 1), n(s.postura != null && s.std?.postura != null ? s.postura - s.std.postura : null, 1),
           n(s.huevos), n(s.gAve, 1), n(s.std?.alimento, 0), n(s.mlAve, 0), n(s.relacion, 2), n(s.muertas), n(s.mortSemana, 3),
           n(s.mortAcum, 2), n(s.std?.mortAcum, 2), n(s.pesoHuevo, 1), n(s.std?.pesoHuevo, 1), n(s.masa, 1), n(s.pesoAve, 0), n(s.std?.pesoAve, 0),

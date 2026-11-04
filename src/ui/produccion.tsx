@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Printer } from 'lucide-react';
 import { asegurarPeriodo } from '../lib/app';
 import { ir, useEstado } from '../lib/estado';
-import { lineaPorId, semanaTexto, edadSemanas } from '../lib/estandar';
+import { edadSemanas, edadTexto, nombreLinea, rubroDe, estandarDe } from '../lib/estandar';
+import { diaGalpon } from '../lib/indicadores';
 import { inicioLote, resumenGalpon, semanasGalpon, type Semana } from '../lib/semanas';
 import type { Galpon } from '../lib/tipos';
 import { fechaCorta, num, sumarDias } from '../lib/util';
@@ -51,8 +52,9 @@ export function Produccion() {
   const resumenes = useMemo(() => galpones.map((x) => resumenGalpon(indice, x, hoy)), [indice, galpones, hoy]);
 
   if (!g) return <p className="suave">Agrega un galpón en Ajustes para ver su producción.</p>;
-  const linea = lineaPorId(g.linea);
+  const linea = g.linea ? { nombre: nombreLinea(g.linea) } : null;
   const edad = edadSemanas(g, hoy);
+  const engorda = rubroDe(g.linea) === 'engorda';
   return (
     <div className="produccion">
       <header className="prod-cabeza">
@@ -86,7 +88,7 @@ export function Produccion() {
         </div>
         <p className="chico suave">
           {linea && edad != null
-            ? `${linea.nombre}, ${semanaTexto(edad)} de vida. La línea punteada es la guía genética.`
+            ? `${linea.nombre}, ${edadTexto(g, hoy)} de vida. La línea punteada es la guía genética.`
             : 'Para comparar con la curva de la guía genética, indica la línea y la fecha de nacimiento del lote en Ajustes, Galpones.'}
           {!(linea && edad != null) && (
             <>
@@ -99,6 +101,7 @@ export function Produccion() {
         </p>
       </header>
 
+      {engorda && <FichaEngorda galpon={g} hoy={hoy} />}
       <div className="prod-graficos">
         {MEDIDAS.filter((m) => semanas.some((s) => s[m.id] != null)).map((m) => (
           <Grafico key={m.id} medida={m} semanas={semanas} conEdad={edad != null} />
@@ -308,3 +311,51 @@ function Grafico({ medida, semanas, conEdad }: { medida: (typeof MEDIDAS)[number
 }
 
 export const galponesConCurva = (gs: Galpon[]) => gs.filter((g) => g.linea && g.nacimiento).length;
+
+/**
+ * Pollo de engorda: los indicadores del lote a la fecha. Conversión = alimento acumulado ÷ kilos vivos (último pesaje × aves
+ * vivas); IEP = viabilidad % × peso kg ÷ (edad en días × conversión) × 100.
+ */
+function FichaEngorda({ galpon: g, hoy }: { galpon: Galpon; hoy: string }) {
+  const indice = useIndice();
+  const desde = inicioLote(g) ?? g.nacimiento ?? hoy;
+  const datos = useMemo(() => {
+    let alimento = 0;
+    let muertas = 0;
+    let iniciales: number | null = null;
+    let vivas: number | null = null;
+    for (let f = desde; f <= hoy; f = sumarDias(f, 1)) {
+      const d = diaGalpon(indice, g, f);
+      iniciales = iniciales ?? d.aves;
+      alimento += d.alimKg ?? 0;
+      muertas += d.muertas ?? 0;
+      vivas = d.vivas ?? (d.aves != null ? d.aves - (d.muertas ?? 0) : vivas);
+    }
+    const ss = semanasGalpon(indice, g, desde, hoy).filter((x) => x.pesoAve != null);
+    const peso = ss.at(-1)?.pesoAve ?? null;
+    return { alimento, muertas, iniciales, vivas, peso };
+  }, [indice, g, desde, hoy]);
+  const dias = g.nacimiento ? Math.round((new Date(`${hoy}T12:00:00`).getTime() - new Date(`${g.nacimiento}T12:00:00`).getTime()) / 86400000) : null;
+  const std = dias != null && g.linea ? estandarDe(g.linea, dias / 7) : null;
+  const viab = datos.iniciales && datos.vivas != null ? (datos.vivas * 100) / datos.iniciales : null;
+  const kilos = datos.peso != null && datos.vivas != null ? (datos.peso / 1000) * datos.vivas : null;
+  const ca = kilos && datos.alimento ? datos.alimento / kilos : null;
+  const iep = viab != null && datos.peso != null && ca && dias ? (viab * (datos.peso / 1000)) / (dias * ca) * 100 : null;
+  const k = (t: string, v: string, d?: string, tono?: string) => (
+    <div className={`kpi ${tono ?? ''}`}>
+      <span className="kpi-titulo">{t}</span>
+      <span className="kpi-valor">{v}</span>
+      {d && <span className="kpi-detalle">{d}</span>}
+    </div>
+  );
+  return (
+    <div className="kpis">
+      {k('Edad', dias != null ? `${dias} días` : '–')}
+      {k('Aves vivas', datos.vivas != null ? num(datos.vivas) : '–', viab != null ? `viabilidad ${num(viab, 1)} %` : undefined)}
+      {k('Peso (último pesaje)', datos.peso != null ? `${num(datos.peso)} g` : '–', std?.pesoAve != null ? `guía ${num(std.pesoAve)} g` : undefined, datos.peso != null && std?.pesoAve != null && datos.peso < std.pesoAve * 0.93 ? 'mal' : undefined)}
+      {k('Alimento acumulado', `${num(datos.alimento)} kg`)}
+      {k('Conversión', ca != null ? num(ca, 3) : '–', std?.ca != null ? `guía ${num(std.ca, 3)}` : undefined, ca != null && std?.ca != null && ca > std.ca + 0.05 ? 'atencion' : undefined)}
+      {k('IEP', iep != null ? num(iep) : '–', 'viabilidad × peso ÷ (edad × conversión)')}
+    </div>
+  );
+}

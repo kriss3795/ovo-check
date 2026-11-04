@@ -118,7 +118,7 @@ Las tareas clásicas de postura vienen cargadas: temperatura mínima y máxima, 
 - **Alertas:** problemas informados, lecturas de medidor menores que la anterior, aves vivas que no calzan con la mortalidad y mediciones fuera de lo lógico, para marcarlas como revisadas.
 - **Cómo se calculó:** al abrir cualquier registro con un indicador se ve la cuenta completa, por ejemplo "91,2 % de postura = 10.032 huevos ÷ 11.000 aves × 100", la resta de lecturas del medidor, la relación agua/alimento del día, y de dónde salió el número de aves.
 - **Historial:** cualquier día anterior, y un resumen por tarea (fechas por galpón) con los indicadores calculados: consumo del día, ml por ave, g por ave, % de postura.
-- **Descargar datos:** un Excel para la gerencia con las hojas que se elijan (resumen diario por galpón, semanal con la guía genética, alertas con su motivo y el detalle de cada registro), o solo los registros en CSV.
+- **Descargar datos:** un Excel completo para la gerencia: una hoja de resumen con los indicadores por galpón y gráficos semanales contra la guía genética (postura, alimento, mortalidad), más resumen diario, semanal, alertas, pesajes, gestión y todos los registros. Se puede elegir qué hojas incluir, o bajar solo los registros en CSV.
 - **Descargar fotos:** un archivo .zip con las fotos, ordenadas por día y galpón.
 
 ---
@@ -133,6 +133,18 @@ En **Ajustes > Galpones > el galpón** se indican la **línea genética** (Hy-Li
 Las curvas salen de las guías de cada empresa genética (punto medio de sus rangos; el alimento de Lohmann es estimado). Cada plantel ajusta sus límites en Ajustes > Alertas de mediciones.
 
 **Detectores de datos mal anotados** (avisan al supervisor, nunca al operario): un número 5 veces mayor o menor que lo habitual (un dígito de más, o un punto en vez de coma), el mismo número de huevos cuatro días seguidos, la postura que cae 3 puntos o más contra el promedio de los días anteriores, la relación agua/alimento fuera de 1,5 a 3 L/kg (el tope sube con calor sobre 28 °C), medidor que retrocede, mínima mayor que la máxima, aves vivas que no calzan, y registros hechos con la ubicación apagada. Con varias recolecciones al día la postura se juzga con el total del día. En recría o en galpones chicos no se usan los límites de ponedora adulta.
+
+---
+
+## Ponedoras, reproductoras broiler y pollos de engorda
+
+La misma app sirve para los tres. Lo que cambia se elige en cada galpón (**Ajustes > Galpones > el galpón > Línea genética**):
+
+- **Ponedoras:** Hy-Line Brown, W-36, W-80, Lohmann Brown-Classic y LSL-Classic. Edad en semanas.
+- **Reproductoras broiler:** Ross 308 y Cobb 500 FF (recría y producción). Se compara el peso de la hembra (bajo y sobre la guía: en reproductoras pasarse también es un problema), el alimento, la postura y el peso de huevo. Para recolectar se usa la tarea *Huevos de reproductoras* (totales, incubables, de piso y comerciales), y hay tareas para alimento, pesaje y mortalidad de machos.
+- **Pollos de engorda:** Ross 308 y Cobb 500. Se anota la **fecha de recepción** (día 0) y la edad va en días. Al galpón no se le piden huevos. En Producción aparecen la edad, la viabilidad, el peso del último pesaje contra la guía, el alimento acumulado, la **conversión** y el **IEP** (viabilidad × peso ÷ (edad × conversión) × 100). Tareas: *Pesaje de pollos*, *Descarte de aves*, *Raleo o retiro de pollos*.
+
+Las curvas salen de las guías oficiales de Aviagen y Cobb (as-hatched en engorda). Los pesajes se anotan ave por ave: la app saca el promedio, el CV y la uniformidad, y avisa si la uniformidad baja de 80 % o si un peso parece anotado en kilos en vez de gramos.
 
 ---
 

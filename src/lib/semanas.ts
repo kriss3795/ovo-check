@@ -1,6 +1,6 @@
 // Producción por semana de vida del lote (o por semana del calendario si no se sabe la edad),
 // comparada con la curva de la línea genética. Sale de los mismos registros diarios que ve el supervisor.
-import { edadSemanas, estandarDe, lineaPorId, tipoDato, enGramos } from './estandar';
+import { edadSemanas, estandarDe, nombreLinea, tipoDato, enGramos } from './estandar';
 import { diaGalpon, type Dia } from './indicadores';
 import type { Indice } from './logica';
 import type { Galpon } from './tipos';
@@ -127,7 +127,7 @@ export function resumenGalpon(indice: Indice, g: Galpon, hoy: string) {
   return {
     g,
     semana: edad != null ? Math.floor(edad) + 1 : null,
-    linea: lineaPorId(g.linea)?.nombre ?? null,
+    linea: (nombreLinea(g.linea) || null),
     postura: prom(ds.map((d) => d.postura)),
     gAve: prom(ds.map((d) => d.gAve)),
     mlAve: prom(ds.map((d) => d.mlAve)),

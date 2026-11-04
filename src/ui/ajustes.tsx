@@ -6,7 +6,7 @@ import {
 import { administrar, ahora, anonimizarPersona, diagnostico, guardarConfig, invitacionQR, salir } from '../lib/app';
 import { createPortal } from 'react-dom';
 import { CodigoQR, EscanerQR, codigoLegible, enlaceUnirse, leerQR } from './qr';
-import { LINEAS, edadSemanas, semanaTexto } from '../lib/estandar';
+import { LINEAS, LINEAS_BROILER, edadTexto, rubroDe } from '../lib/estandar';
 import { avisar, ir, poner, useEstado, volver } from '../lib/estado';
 import { anotarPausa, cargaDiaria, limitesDe, limitesSugeridos, LOGICA_DEFECTO, logicaDe, NOMBRE_BLOQUE, unidadResultado } from '../lib/logica';
 import { mensajeError } from '../lib/nube';
@@ -627,25 +627,45 @@ function Galpones() {
 
 /** Línea genética y fecha de nacimiento: con eso se compara el galpón contra la curva de su genética. */
 function CamposGenetica(p: { linea: string; nacimiento: string; alCambiar: (c: { linea?: string; nacimiento?: string }) => void; hoy: string }) {
-  const edad = p.nacimiento ? edadSemanas({ nacimiento: p.nacimiento } as Galpon, p.hoy) : null;
+  const engorda = rubroDe(p.linea) === 'engorda';
+  const edad = p.nacimiento ? edadTexto({ nacimiento: p.nacimiento, linea: p.linea } as Galpon, p.hoy) : null;
   return (
     <>
       <label className="campo">
         <span>Línea genética</span>
         <select className="entrada" value={p.linea} onChange={(e) => p.alCambiar({ linea: e.target.value })}>
           <option value="">Otra, o no comparar con una curva</option>
-          {LINEAS.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.nombre}
-            </option>
-          ))}
+          <optgroup label="Ponedoras">
+            {LINEAS.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.nombre}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Reproductoras broiler (recría y producción)">
+            {LINEAS_BROILER.filter((l) => l.tipo === 'reproductora').map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.nombre}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Pollo de engorda">
+            {LINEAS_BROILER.filter((l) => l.tipo === 'engorda').map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.nombre}
+              </option>
+            ))}
+          </optgroup>
         </select>
-        <small>Con la línea y la edad, la app compara la postura, el alimento y los pesos con la curva de la guía genética y te avisa si se alejan.</small>
+        <small>
+          Con la línea y la edad, la app compara {engorda ? 'el peso, el consumo y la conversión' : 'la postura, el alimento y los pesos'} con la curva de la guía
+          genética y te avisa si se alejan.
+        </small>
       </label>
       <label className="campo">
-        <span>Fecha de nacimiento del lote</span>
+        <span>{engorda ? 'Fecha de recepción del pollito (día 0)' : 'Fecha de nacimiento del lote'}</span>
         <input className="entrada" type="date" value={p.nacimiento} max={p.hoy} onChange={(e) => p.alCambiar({ nacimiento: e.target.value })} />
-        {edad != null && <small>Hoy va en la {semanaTexto(edad)} de vida.</small>}
+        {edad != null && <small>Hoy va en {edad.startsWith('día') ? 'el' : 'la'} {edad} de vida.</small>}
       </label>
     </>
   );

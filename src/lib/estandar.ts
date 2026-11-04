@@ -1,10 +1,16 @@
 // Comparación con el estándar de la línea genética y detección de datos que parecen mal anotados.
 // Todo esto lo ve solo el supervisor: el operario nunca recibe rangos ni pistas.
-import { LINEAS, type Linea } from './curvas';
+import { LINEAS, LINEAS_BROILER, type Linea, type LineaBroiler } from './curvas';
 import type { Config, Galpon, Registro } from './tipos';
 import { diasEntre, num } from './util';
 
-export { LINEAS };
+export { LINEAS, LINEAS_BROILER };
+
+/** Qué produce el galpón según su línea genética. Sin línea = ponedoras (como siempre). */
+export type Rubro = 'postura' | 'reproductora' | 'engorda';
+export const lineaBroiler = (id: string | null | undefined): LineaBroiler | undefined => (id ? LINEAS_BROILER.find((l) => l.id === id) : undefined);
+export const rubroDe = (lineaId: string | null | undefined): Rubro => lineaBroiler(lineaId)?.tipo ?? 'postura';
+export const nombreLinea = (id: string | null | undefined) => (id ? (LINEAS.find((l) => l.id === id)?.nombre ?? lineaBroiler(id)?.nombre ?? id) : '');
 
 /** Lo que dice la guía para una semana de edad (interpolado entre semanas publicadas). */
 export interface Estandar {
@@ -14,6 +20,11 @@ export interface Estandar {
   alimento: number | null;
   pesoAve: number | null;
   mortAcum: number | null;
+  /** Engorda: conversión acumulada de la guía. Reproductoras: % de huevos incubables. */
+  ca?: number | null;
+  incubables?: number | null;
+  /** Edad en días (engorda). */
+  dia?: number;
 }
 
 export const lineaPorId = (id: string | null | undefined): Linea | undefined => (id ? LINEAS.find((l) => l.id === id) : undefined);
@@ -36,8 +47,30 @@ function interpolar(filas: (number | null)[][], semana: number, col: number): nu
 
 /** Estándar de una línea a una edad dada en semanas (con decimales: la semana 30,5 queda entre la 30 y la 31). */
 export function estandarDe(lineaId: string | null | undefined, semana: number | null): Estandar | null {
+  if (semana == null) return null;
+  const b = lineaBroiler(lineaId);
+  if (b?.tipo === 'engorda') {
+    // Pollo de engorda: la guía es por día de edad.
+    const d = b.engorda as (number | null)[][];
+    const dia = semana * 7;
+    return { semana, dia, postura: null, pesoHuevo: null, alimento: interpolar(d, dia, 2), pesoAve: interpolar(d, dia, 1), mortAcum: null, ca: interpolar(d, dia, 4) };
+  }
+  if (b?.tipo === 'reproductora') {
+    const p = b.postura!;
+    const r = b.recria!;
+    const enPostura = semana >= (p[0]?.[0] as number);
+    return {
+      semana,
+      postura: enPostura ? interpolar(p, semana, 1) : null,
+      pesoHuevo: enPostura ? interpolar(p, semana, 2) : null,
+      alimento: enPostura ? interpolar(p, semana, 3) : interpolar(r, semana, 2),
+      pesoAve: enPostura ? interpolar(p, semana, 4) : interpolar(r, semana, 1),
+      mortAcum: enPostura ? interpolar(p, semana, 5) : null,
+      incubables: enPostura ? interpolar(p, semana, 6) : null,
+    };
+  }
   const l = lineaPorId(lineaId);
-  if (!l || semana == null) return null;
+  if (!l) return null;
   const p = l.postura as (number | null)[][];
   const r = l.recria as (number | null)[][];
   const enPostura = semana >= (p[0]?.[0] as number);
@@ -88,7 +121,15 @@ export const enGramos = (v: number, unidad: string) => (/^(kg|kilos?)$/i.test(un
 
 /** Texto corto del estándar para el supervisor: "estándar Hy-Line Brown, semana 34". */
 export function rotuloEstandar(lineaId: string, semana: number) {
-  return `estándar ${lineaPorId(lineaId)?.nombre ?? lineaId}, ${semanaTexto(semana)}`;
+  if (rubroDe(lineaId) === 'engorda') return `estándar ${nombreLinea(lineaId)}, día ${Math.round(semana * 7)}`;
+  return `estándar ${nombreLinea(lineaId)}, ${semanaTexto(semana)}`;
+}
+
+/** Edad para mostrar: en días para pollos de engorda, en semanas para el resto. */
+export function edadTexto(g: Galpon | undefined, fecha: string): string | null {
+  const s = edadSemanas(g, fecha);
+  if (s == null) return null;
+  return rubroDe(g?.linea) === 'engorda' ? `día ${Math.round(s * 7)}` : semanaTexto(s);
 }
 
 /**
@@ -127,8 +168,18 @@ export function avisosCurva(p: {
     if (tipo === 'peso_huevo' && e.pesoHuevo != null && gr < e.pesoHuevo - DESVIO.pesoHuevo) {
       out.push(`Peso de huevo ${num(gr, 1)} g: ${num(e.pesoHuevo - gr, 1)} g bajo el ${rot} (${num(e.pesoHuevo, 1)} g)`);
     }
-    if (tipo === 'peso_ave' && e.pesoAve != null && gr < e.pesoAve * (1 - DESVIO.pesoAve / 100)) {
-      out.push(`Peso vivo ${num(gr)} g: ${num(((e.pesoAve - gr) / e.pesoAve) * 100)} % bajo el ${rot} (${num(e.pesoAve)} g)`);
+    if (tipo === 'peso_ave' && e.pesoAve != null) {
+      const rubro = rubroDe(g.linea);
+      if (gr < e.pesoAve * 0.2 && !/kg/i.test(c.unidad)) {
+        out.push(`Peso ${num(v, 2)} ${c.unidad}: parece anotado en kilos y no en gramos (la guía dice ${num(e.pesoAve)} g)`);
+        return;
+      }
+      const dif = ((gr - e.pesoAve) / e.pesoAve) * 100;
+      // Engorda: bajo la guía es lo que importa. Reproductoras: también pasarse de peso es un problema.
+      const limite = rubro === 'engorda' ? 7 : DESVIO.pesoAve;
+      if (dif < -limite || (rubro === 'reproductora' && dif > limite)) {
+        out.push(`Peso vivo ${num(gr)} g: ${num(Math.abs(dif))} % ${dif < 0 ? 'bajo' : 'sobre'} el ${rot} (${num(e.pesoAve)} g)`);
+      }
     }
   });
   return out;
