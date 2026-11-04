@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './styles.css';
 import { App } from './App';
 import { iniciar } from './lib/app';
-import { poner } from './lib/estado';
+import { leerEstado, poner } from './lib/estado';
 
 createRoot(document.getElementById('raiz')!).render(
   <StrictMode>
@@ -18,9 +18,22 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   // estar a medio registrar).
   const habiaVersion = Boolean(navigator.serviceWorker.controller);
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (habiaVersion) poner({ actualizacion: true });
+    if (!habiaVersion) return;
+    // Fuera de la app (entrada, desvinculado) o en una pantalla principal, se aplica sola: nada se pierde, todo está
+    // guardado en el teléfono. A medio registrar, se avisa y la persona decide.
+    const e = leerEstado();
+    if (e.fase !== 'app' || e.ruta.length <= 1) window.location.reload();
+    else poner({ actualizacion: true });
   });
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    navigator.serviceWorker
+      .register('/sw.js')
+      .then((r) => {
+        // Busca versiones nuevas al volver a la app y cada 30 minutos.
+        const revisar = () => r.update().catch(() => {});
+        document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && revisar());
+        setInterval(revisar, 30 * 60000);
+      })
+      .catch(() => {});
   });
 }

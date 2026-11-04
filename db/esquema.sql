@@ -1861,7 +1861,7 @@ declare
   g oc_granjas; d oc_dispositivos; s uuid; cfg jsonb := p -> 'config'; sup jsonb; cod text; nombre text;
   origen text := oc__origen(); r jsonb; n integer := 0;
 begin
-  if oc__frenado('demo:' || origen, case when origen = 'sin-ip' then 30 else 5 end, interval '1 day') then
+  if oc__frenado('demo:' || origen, case when origen = 'sin-ip' then 60 else 20 end, interval '1 day') then
     return jsonb_build_object('error', 'OC_BLOQUEO');
   end if;
   perform oc__borrar_demos();
@@ -1876,7 +1876,6 @@ begin
   if sup is null then
     raise exception 'OC_DATOS';
   end if;
-  perform oc__anotar('demo:' || origen);
   cod := oc__codigo_nuevo();
   nombre := 'Demostración ' || upper(left(md5(random()::text), 4));
   cfg := cfg || jsonb_build_object('demo', true);
@@ -1898,6 +1897,7 @@ begin
       on conflict (id) do nothing;
     n := n + 1;
   end loop;
+  perform oc__anotar('demo:' || origen);
   return jsonb_build_object('token', d.token, 'dispositivo_id', d.id, 'sesion', s, 'usuario_id', sup ->> 'id', 'version', g.version,
     'config', oc__config_para(g, true), 'clave_operarios', g.clave_operarios, 'registros', n);
 end $$;
