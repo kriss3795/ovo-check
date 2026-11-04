@@ -297,6 +297,59 @@ export async function vincular(plantel: string, clave: string, nombreDisp: strin
   sincronizar();
 }
 
+/** Suma este teléfono al plantel con el código del QR que muestra el supervisor. Devuelve el nombre del plantel. */
+export async function vincularQR(codigo: string, nombreDisp: string): Promise<string> {
+  exigirColaVacia();
+  const r = await rpc('oc_unirse_qr', { invitacion: codigo, dispositivo: nombreDisp });
+  await instalarGranja(r, nombreDisp);
+  poner({ fase: 'ingreso', usuario: null, rolIngreso: 'operario' });
+  avisarProblema(); // los supervisores reciben el aviso de que entró un equipo nuevo
+  sincronizar();
+  return r.granja;
+}
+
+/** Computador: pide un QR para entrar con el celular del supervisor. */
+export async function pedirQrEntrada(nombreDisp: string): Promise<{ codigo: string; secreto: string; dura: number }> {
+  return rpc('oc_qr_pedir', { dispositivo: nombreDisp });
+}
+
+/** Computador: pregunta si ya aprobaron la entrada. true = entró. */
+export async function esperarQrEntrada(codigo: string, secreto: string, nombreDisp: string): Promise<boolean> {
+  const r = await rpc('oc_qr_esperar', { codigo, secreto });
+  if (r.espera) return false;
+  exigirColaVacia();
+  await instalarGranja(r, nombreDisp);
+  credenciales.sesiones[r.usuario_id] = r.sesion;
+  await idb.guardar('kv', credenciales, 'credenciales');
+  const u = (r.config as Config).usuarios.find((x) => x.id === r.usuario_id)!;
+  poner({ cambiarClave: Boolean(r.temporal), clavePlantel: r.clave_operarios ?? null });
+  await abrirSesion(u);
+  return true;
+}
+
+/** Celular del supervisor: aprueba la entrada de otro equipo que muestra un QR. */
+export async function aprobarQrEntrada(codigo: string): Promise<string> {
+  const e = leerEstado();
+  try {
+    const r = await rpc('oc_qr_aprobar', { token: e.dispositivo!.token, sesion: sesionDe(e.usuario), codigo });
+    return r.dispositivo || 'el otro equipo';
+  } catch (err) {
+    manejarErrorSesion(err);
+    throw err;
+  }
+}
+
+/** Supervisor: el código vigente para sumar teléfonos con QR (o uno nuevo, que anula el anterior). */
+export async function invitacionQR(nueva = false): Promise<{ codigo: string; vence: string; usos: number }> {
+  const e = leerEstado();
+  try {
+    return await rpc('oc_invitacion', { token: e.dispositivo!.token, sesion: sesionDe(e.usuario), nueva });
+  } catch (err) {
+    manejarErrorSesion(err);
+    throw err;
+  }
+}
+
 /**
  * Entrada del supervisor con correo y clave, desde un equipo que aún no está en su plantel.
  * Si ese correo supervisa más de un plantel, devuelve la lista para elegir.
@@ -546,19 +599,22 @@ export function abrirVisita(galponId: string) {
 
 /** Pide la ubicación en segundo plano; si no llega, el registro se guarda igual sin GPS. */
 export function ubicar(galponId: string) {
-  if (!('geolocation' in navigator)) return;
+  const anotar = (cambio: Partial<Visita>) => {
+    const v = leerEstado().visitas[galponId];
+    if (!v) return;
+    const visitas = { ...leerEstado().visitas, [galponId]: { ...v, ...cambio } };
+    poner({ visitas });
+    idb.guardar('kv', visitas, 'visitas');
+  };
+  if (!('geolocation' in navigator)) return anotar({ gpsError: 'apagada' });
   navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const v = leerEstado().visitas[galponId];
-      if (!v) return;
-      const visitas = {
-        ...leerEstado().visitas,
-        [galponId]: { ...v, lat: pos.coords.latitude, lng: pos.coords.longitude, precision: Math.round(pos.coords.accuracy) },
-      };
-      poner({ visitas });
-      idb.guardar('kv', visitas, 'visitas');
+    (pos) => anotar({ lat: pos.coords.latitude, lng: pos.coords.longitude, precision: Math.round(pos.coords.accuracy), gpsError: null }),
+    // 1 = la app no tiene permiso; 2 = la ubicación del teléfono está apagada. 3 (tardó) no es culpa de nadie: dentro
+    // de un galpón el GPS a veces no alcanza a responder, y no se marca.
+    (err) => {
+      if (err.code === 1) anotar({ gpsError: 'sin_permiso' });
+      else if (err.code === 2) anotar({ gpsError: 'apagada' });
     },
-    () => {},
     { enableHighAccuracy: true, timeout: 15000, maximumAge: 120000 },
   );
 }

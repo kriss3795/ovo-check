@@ -1055,7 +1055,7 @@ begin
     insert into oc_registros (id, granja_id, dispositivo_id, fecha, galpon_id, datos, capturado, reloj_desfase_s, demora_s, critico)
       values ((r ->> 'id')::uuid, d.granja_id, d.id, (r ->> 'fecha')::date, r ->> 'galpon_id', r,
               cap, desfase, round(ms / 1000)::int,
-              coalesce(jsonb_typeof(r -> 'flags') = 'array' and (r -> 'flags') ?| array['problema', 'retrocede', 'no_calza', 'ilogico'], false)
+              coalesce(jsonb_typeof(r -> 'flags') = 'array' and (r -> 'flags') ?| array['problema', 'retrocede', 'no_calza', 'ilogico', 'gps_apagado'], false)
                 and not coalesce((r ->> 'anulado')::boolean, false))
       on conflict (id) do nothing;
     select * into fila from oc_registros where id = (r ->> 'id')::uuid and granja_id = d.granja_id;
@@ -1640,5 +1640,147 @@ create view oc_soporte_uso as
     (select max(r.recibido) from oc_registros r where r.granja_id = g.id) as ultimo_registro,
     oc__fotos_usadas(g.id) as fotos, oc__mb_fotos(g.id) as mb_fotos
   from oc_granjas g order by g.creado;
+
+-- ===================== Entrar con QR =====================
+-- 1) Invitación del plantel: el supervisor muestra un QR; el operario lo escanea y su teléfono queda en el plantel,
+--    sin escribir el nombre ni la clave. El código vence a los 30 días y se puede cambiar (el anterior deja de servir).
+-- 2) Entrar en el computador con el celular: el computador muestra un QR que dura 3 minutos; el supervisor lo
+--    escanea desde la app en su celular (ya con su sesión abierta), lo aprueba, y el computador entra con su nombre.
+create table if not exists oc_invitaciones (
+  codigo text primary key,
+  granja_id uuid not null references oc_granjas (id) on delete cascade,
+  creado timestamptz not null default now(),
+  vence timestamptz not null,
+  usos integer not null default 0,
+  creado_por text
+);
+create index if not exists oc_invitaciones_granja on oc_invitaciones (granja_id);
+
+create table if not exists oc_qr_entradas (
+  codigo text primary key,
+  secreto text not null,
+  creado timestamptz not null default now(),
+  dispositivo text not null default '',
+  granja_id uuid references oc_granjas (id) on delete cascade,
+  usuario_id text,
+  aprobado timestamptz,
+  usado boolean not null default false
+);
+
+-- Código corto, sin letras que se confundan, para el QR (y para dictarlo si la cámara falla).
+create or replace function oc__codigo_corto(largo integer) returns text
+language sql volatile as $$
+  select string_agg(substr('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 1 + floor(random() * 32)::int, 1), '')
+  from generate_series(1, largo);
+$$;
+
+-- Supervisor: ver (o crear) la invitación vigente del plantel. {token, sesion, nueva?:true}
+create or replace function oc_invitacion(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare d oc_dispositivos; u text; i oc_invitaciones;
+begin
+  d := oc__dispositivo(p ->> 'token');
+  u := oc__supervisor(d, p ->> 'sesion');
+  if coalesce((p ->> 'nueva')::boolean, false) then
+    delete from oc_invitaciones where granja_id = d.granja_id;
+    perform oc__bitacora(d.granja_id, u, 'Cambió el QR para sumar teléfonos', '[]'::jsonb);
+  end if;
+  select * into i from oc_invitaciones where granja_id = d.granja_id and vence > now() order by creado desc limit 1;
+  if not found then
+    delete from oc_invitaciones where granja_id = d.granja_id;
+    insert into oc_invitaciones (codigo, granja_id, vence, creado_por)
+      values (oc__codigo_corto(12), d.granja_id, now() + interval '30 days', u) returning * into i;
+  end if;
+  return jsonb_build_object('codigo', i.codigo, 'vence', i.vence, 'usos', i.usos);
+end $$;
+
+-- Teléfono nuevo con el QR del plantel. {invitacion, dispositivo}
+create or replace function oc_unirse_qr(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare i oc_invitaciones; g oc_granjas; d oc_dispositivos; origen text := oc__origen(); c text := upper(trim(coalesce(p ->> 'invitacion', '')));
+begin
+  if oc__frenado('qr:' || origen, case when origen = 'sin-ip' then 60 else 15 end) then
+    return jsonb_build_object('error', 'OC_BLOQUEO');
+  end if;
+  select * into i from oc_invitaciones where codigo = c and vence > now();
+  if not found then
+    perform oc__anotar('qr:' || origen);
+    perform pg_sleep(0.3);
+    return jsonb_build_object('error', 'OC_QR_VENCIDO');
+  end if;
+  select * into g from oc_granjas where id = i.granja_id;
+  if oc__frenado('alta:' || g.id, 40, interval '1 hour')
+     or (select count(*) from oc_dispositivos x where x.granja_id = g.id) >= 2000 then
+    return jsonb_build_object('error', 'OC_BLOQUEO');
+  end if;
+  perform oc__anotar('alta:' || g.id);
+  update oc_invitaciones set usos = usos + 1 where codigo = c;
+  insert into oc_dispositivos (granja_id, token, nombre, visto, reconocido, avisado)
+    values (g.id, oc__token_nuevo(), left(coalesce(p ->> 'dispositivo', ''), 60), now(), false, false) returning * into d;
+  perform oc__bitacora(g.id, null, 'Equipo nuevo con el QR del plantel', jsonb_build_array(d.nombre));
+  return jsonb_build_object('token', d.token, 'dispositivo_id', d.id, 'version', g.version, 'config', oc__config_para(g, false),
+    'granja', g.nombre);
+end $$;
+
+-- Computador: pedir un QR para entrar. {dispositivo}  ->  {codigo, secreto}
+create or replace function oc_qr_pedir(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare origen text := oc__origen(); c text; s text;
+begin
+  if oc__frenado('qrpedir:' || origen, case when origen = 'sin-ip' then 120 else 30 end) then
+    return jsonb_build_object('error', 'OC_BLOQUEO');
+  end if;
+  perform oc__anotar('qrpedir:' || origen);
+  delete from oc_qr_entradas where creado < now() - interval '1 hour';
+  c := oc__codigo_corto(10);
+  s := oc__token_nuevo();
+  insert into oc_qr_entradas (codigo, secreto, dispositivo) values (c, s, left(coalesce(p ->> 'dispositivo', ''), 60));
+  return jsonb_build_object('codigo', c, 'secreto', s, 'dura', 180);
+end $$;
+
+-- Celular del supervisor: aprobar la entrada del computador. {token, sesion, codigo}
+create or replace function oc_qr_aprobar(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare d oc_dispositivos; u text; q oc_qr_entradas;
+begin
+  d := oc__dispositivo(p ->> 'token');
+  u := oc__supervisor(d, p ->> 'sesion');
+  select * into q from oc_qr_entradas where codigo = upper(trim(coalesce(p ->> 'codigo', '')))
+    and creado > now() - interval '3 minutes' and aprobado is null and not usado;
+  if not found then
+    return jsonb_build_object('error', 'OC_QR_VENCIDO');
+  end if;
+  update oc_qr_entradas set aprobado = now(), granja_id = d.granja_id, usuario_id = u where codigo = q.codigo;
+  return jsonb_build_object('ok', true, 'dispositivo', q.dispositivo);
+end $$;
+
+-- Computador: preguntar si ya lo aprobaron. {codigo, secreto}  ->  {espera:true} | datos de entrada | error
+create or replace function oc_qr_esperar(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare q oc_qr_entradas; g oc_granjas; u jsonb; d oc_dispositivos; s uuid;
+begin
+  select * into q from oc_qr_entradas where codigo = upper(trim(coalesce(p ->> 'codigo', '')))
+    and secreto = coalesce(p ->> 'secreto', '') and not usado;
+  if not found or (q.aprobado is null and q.creado < now() - interval '3 minutes') then
+    return jsonb_build_object('error', 'OC_QR_VENCIDO');
+  end if;
+  if q.aprobado is null then
+    return jsonb_build_object('espera', true);
+  end if;
+  update oc_qr_entradas set usado = true where codigo = q.codigo;
+  select * into g from oc_granjas where id = q.granja_id;
+  select x into u from jsonb_array_elements(g.config -> 'usuarios') x
+    where x ->> 'id' = q.usuario_id and (x ->> 'activo')::boolean and x ->> 'rol' = 'supervisor';
+  if u is null then
+    return jsonb_build_object('error', 'OC_QR_VENCIDO');
+  end if;
+  insert into oc_dispositivos (granja_id, token, nombre, visto, usuario_id, reconocido, avisado)
+    values (g.id, oc__token_nuevo(), coalesce(nullif(q.dispositivo, ''), 'Computador'), now(), u ->> 'id', true, true) returning * into d;
+  insert into oc_sesiones (granja_id, dispositivo_id, usuario_id) values (g.id, d.id, u ->> 'id') returning id into s;
+  perform oc__bitacora(g.id, u ->> 'id', 'Entrada con QR desde otro equipo', jsonb_build_array(d.nombre));
+  return jsonb_build_object('token', d.token, 'dispositivo_id', d.id, 'sesion', s, 'usuario_id', u ->> 'id',
+    'version', g.version, 'config', oc__config_para(g, true), 'clave_operarios', g.clave_operarios,
+    'temporal', coalesce((u ->> 'temporal')::boolean, false));
+end $$;
 
 select 'Ovo Check instalado' as resultado;

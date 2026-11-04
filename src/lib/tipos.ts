@@ -232,6 +232,7 @@ export type Flag =
   | 'ilogico' // algún dato quedó fuera de lo lógico (el detalle va en 'avisos')
   | 'no_calza' // las aves vivas anotadas no calzan con las de la vez anterior menos las muertas de hoy
   | 'lejos' // GPS lejos del galpón
+  | 'gps_apagado' // el teléfono tenía la ubicación apagada o sin permiso para la app
   | 'sin_foto' // la tarea pedía foto y no se pudo tomar
   | 'omitida' // el operario indicó que hoy no se pudo hacer
   | 'temprano'; // tarea de la tarde registrada en la mañana

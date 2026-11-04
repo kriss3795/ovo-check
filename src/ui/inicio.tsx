@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
-import { CheckCircle2, ChevronRight, ClipboardCheck, Eye, EyeOff, KeyRound, Mail, Minus, Plus, ShieldCheck, UserPlus } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { CheckCircle2, ChevronRight, ClipboardCheck, QrCode, ScanLine, Eye, EyeOff, KeyRound, Mail, Minus, Plus, ShieldCheck, UserPlus } from 'lucide-react';
 import {
   autorizarOperario, buscarPlantel, cambiarClave, comprobarVinculo, crearGranja, crearPin, entrarOperario, entrarSupervisor, entrarSupervisorCorreo, pedirCodigo,
-  pedirCodigoCorreo, recuperarClave, recuperarClaveCorreo, salir, vincular,
+  pedirCodigoCorreo, recuperarClave, recuperarClaveCorreo, salir, vincular, vincularQR, pedirQrEntrada, esperarQrEntrada,
 } from '../lib/app';
+import { CodigoQR, EscanerQR, codigoLegible, enlaceAprobar, leerQR } from './qr';
 import { avisar, leerEstado, poner, useEstado } from '../lib/estado';
 import { mensajeError } from '../lib/nube';
 import type { Usuario } from '../lib/tipos';
@@ -13,7 +14,7 @@ import { BotonInstalar } from './avisos';
 
 export const correoValido = (c: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(c.trim());
 
-const nombreEquipo = () =>
+export const nombreEquipo = () =>
   /iPhone|iPad/i.test(navigator.userAgent) ? 'iPhone' : /Android/i.test(navigator.userAgent) ? 'Teléfono Android' : 'Computador';
 
 /** Los dos caminos de entrada. Es lo primero que ve cualquier persona al abrir la app. */
@@ -71,6 +72,8 @@ export function Bienvenida() {
   const invitado = sugerido || (new URLSearchParams(window.location.search).get('plantel')?.trim() ?? '');
   const [paso, setPaso] = useState<'inicio' | 'operario' | 'supervisor' | 'crear' | 'olvido'>(invitado ? 'operario' : 'inicio');
   const anterior = useEstado((e) => (e.config && e.dispositivo && !e.desvinculado ? e.config.granja.nombre : ''));
+  const qrUnir = useEstado((e) => e.qrUnir);
+  if (qrUnir) return <UnirConQR codigo={qrUnir} />;
   if (paso === 'operario') return <EntrarPlantel volver={() => setPaso('inicio')} inicial={invitado} />;
   if (paso === 'supervisor') return <EntrarSupervisor volver={() => setPaso('inicio')} crear={() => setPaso('crear')} olvido={() => setPaso('olvido')} />;
   if (paso === 'crear') return <CrearGranja volver={() => setPaso('supervisor')} />;
@@ -101,7 +104,8 @@ function EntrarPlantel({ volver, inicial }: { volver: () => void; inicial?: stri
   const [clave, setClave] = useState('');
   const [error, setError] = useState('');
   const [ocupado, setOcupado] = useState(false);
-  useAtras(() => (plantel ? (setPlantel(null), setClave(''), setError('')) : volver()));
+  const [escaneando, setEscaneando] = useState(false);
+  useAtras(() => (escaneando ? setEscaneando(false) : plantel ? (setPlantel(null), setClave(''), setError('')) : volver()));
 
   const buscar = async (texto = nombre) => {
     if (texto.trim().length < 3) return setError('Escribe el nombre completo del plantel');
@@ -131,6 +135,20 @@ function EntrarPlantel({ volver, inicial }: { volver: () => void; inicial?: stri
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  if (escaneando) {
+    return (
+      <EscanerQR
+        ayuda="Apunta al código QR que te muestra tu supervisor"
+        cerrar={() => setEscaneando(false)}
+        alLeer={(t) => {
+          setEscaneando(false);
+          const q = leerQR(t);
+          if (q?.tipo === 'unir') poner({ qrUnir: q.codigo });
+          else setError('Ese no es el QR del plantel. Pídele a tu supervisor que te muestre el de Ajustes > Teléfonos.');
+        }}
+      />
+    );
+  }
   if (!plantel) {
     return (
       <div className="pantalla blanca">
@@ -142,14 +160,22 @@ function EntrarPlantel({ volver, inicial }: { volver: () => void; inicial?: stri
             if (!ocupado) buscar();
           }}
         >
-          <h2 className="titulo">Busca tu plantel</h2>
+          <button type="button" className="boton primario grande" onClick={() => (setError(''), setEscaneando(true))}>
+            <ScanLine size={24} aria-hidden /> Escanear el QR del plantel
+          </button>
+          <p className="chico suave" style={{ marginTop: -4 }}>
+            Tu supervisor lo tiene en su app. Con eso entras sin escribir nada.
+          </p>
+          <div className="separador-texto">
+            <span>o busca el plantel por su nombre</span>
+          </div>
           <label className="campo">
             <span>Nombre del plantel</span>
-            <input className="entrada" value={nombre} onChange={(e) => setNombre(e.target.value)} maxLength={60} autoCorrect="off" spellCheck={false} autoFocus enterKeyHint="search" />
+            <input className="entrada" value={nombre} onChange={(e) => setNombre(e.target.value)} maxLength={60} autoCorrect="off" spellCheck={false} enterKeyHint="search" />
             <small>Escríbelo completo, como lo creó tu supervisor. No importan las mayúsculas ni los tildes.</small>
           </label>
           {error && <p className="error-texto" role="alert">{error}</p>}
-          <button className="boton primario grande" disabled={ocupado || nombre.trim().length < 3}>
+          <button className="boton grande" disabled={ocupado || nombre.trim().length < 3}>
             {ocupado ? 'Buscando…' : 'Buscar'}
           </button>
         </form>
@@ -181,6 +207,119 @@ function EntrarPlantel({ volver, inicial }: { volver: () => void; inicial?: stri
         <p className="chico suave">Después eliges tu nombre y creas tu PIN.</p>
       </form>
     </div>
+  );
+}
+
+/** El teléfono se abrió con el QR del plantel: entra solo, sin escribir nada. */
+function UnirConQR({ codigo }: { codigo: string }) {
+  const [error, setError] = useState('');
+  const intento = useRef(false);
+  const unir = async () => {
+    setError('');
+    try {
+      const nombre = await vincularQR(codigo, nombreEquipo());
+      poner({ qrUnir: null });
+      avisar(`Listo: este teléfono quedó en ${nombre}`, 'ok');
+    } catch (e) {
+      setError(mensajeError(e));
+    }
+  };
+  useEffect(() => {
+    if (intento.current) return;
+    intento.current = true;
+    unir();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div className="pantalla blanca">
+      <div className="contenido centrado portada">
+        <img className="logo" src="/logo.webp" alt="Ovo Check" />
+        {!error ? (
+          <p className="suave" role="status">Entrando a tu plantel…</p>
+        ) : (
+          <>
+            <p className="error-texto" role="alert">{error}</p>
+            <button className="boton primario grande" onClick={unir}>
+              Intentar de nuevo
+            </button>
+            <button className="enlace" onClick={() => poner({ qrUnir: null })}>
+              Entrar de otra forma
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Entrar en el computador con el celular: el computador muestra un QR que dura 3 minutos y espera.
+ * El supervisor lo escanea desde su app (Ajustes > Entrar en un computador) y este equipo entra con su nombre.
+ */
+function EntrarConCelular() {
+  const [qr, setQr] = useState<{ codigo: string; secreto: string; hasta: number } | null>(null);
+  const [error, setError] = useState('');
+  const [, refrescar] = useState(0);
+
+  const pedir = async () => {
+    setError('');
+    try {
+      const r = await pedirQrEntrada(nombreEquipo());
+      setQr({ codigo: r.codigo, secreto: r.secreto, hasta: Date.now() + r.dura * 1000 });
+    } catch (e) {
+      setError(mensajeError(e));
+    }
+  };
+  useEffect(() => {
+    pedir();
+  }, []);
+  useEffect(() => {
+    if (!qr) return;
+    let vivo = true;
+    let t = 0;
+    const preguntar = async () => {
+      if (!vivo) return;
+      if (Date.now() > qr.hasta) return refrescar((n) => n + 1);
+      if (document.visibilityState === 'visible') {
+        try {
+          if (await esperarQrEntrada(qr.codigo, qr.secreto, nombreEquipo())) return;
+        } catch (e) {
+          if (!vivo) return;
+          if ((e as any)?.codigo === 'OC_QR_VENCIDO') return refrescar((n) => n + 1);
+        }
+      }
+      t = window.setTimeout(preguntar, 2000);
+    };
+    t = window.setTimeout(preguntar, 2000);
+    return () => {
+      vivo = false;
+      clearTimeout(t);
+    };
+  }, [qr]);
+
+  const vencido = qr && Date.now() > qr.hasta;
+  return (
+    <aside className="entrar-celular">
+      <h3>Entra con tu celular</h3>
+      <ol>
+        <li>Abre Ovo Check en tu celular, con tu usuario de supervisor.</li>
+        <li>
+          Ve a <b>Ajustes &gt; Entrar en un computador</b>.
+        </li>
+        <li>Apunta la cámara a este código.</li>
+      </ol>
+      <div className="entrar-celular-qr">
+        {qr && !vencido ? (
+          <CodigoQR texto={enlaceAprobar(qr.codigo)} tam={200} titulo="Código para entrar con el celular" />
+        ) : (
+          <button className="boton" onClick={pedir}>
+            <QrCode size={20} aria-hidden /> {error ? 'Intentar de nuevo' : 'Mostrar otro código'}
+          </button>
+        )}
+      </div>
+      {qr && !vencido && <p className="chico suave">Código {codigoLegible(qr.codigo)}. Vence en 3 minutos.</p>}
+      {error && <p className="error-texto">{error}</p>}
+    </aside>
   );
 }
 
@@ -233,6 +372,7 @@ function EntrarSupervisor({ volver, crear, olvido }: { volver: () => void; crear
   return (
     <div className="pantalla blanca">
       <Barra titulo="Soy supervisor" atras={volver} />
+      <div className="entrada-doble">
       <form
         className="contenido"
         onSubmit={(e) => {
@@ -259,9 +399,14 @@ function EntrarSupervisor({ volver, crear, olvido }: { volver: () => void; crear
           Crear un plantel nuevo
         </button>
       </form>
+      {esComputador() && <EntrarConCelular />}
+      </div>
     </div>
   );
 }
+
+/** Pantalla ancha y con puntero fino: un computador (ahí conviene entrar escaneando con el celular). */
+const esComputador = () => window.matchMedia?.('(min-width: 900px) and (pointer: fine)').matches ?? false;
 
 /** "Olvidé mi clave" desde un equipo que aún no está en el plantel: llega un código al correo. */
 function RecuperarPorCorreo({ volver }: { volver: () => void }) {

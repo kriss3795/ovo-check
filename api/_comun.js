@@ -74,6 +74,14 @@ export function textoDeRegistro(r) {
   if ((r.flags ?? []).includes('no_calza')) {
     return { titulo: `${lugar}: revisar ${r.tarea}`, texto: `Las aves vivas anotadas no calzan con las del registro anterior. Registró ${r.persona}.` };
   }
+  if ((r.flags ?? []).includes('gps_apagado') && !(r.flags ?? []).includes('omitida') && !r.nota) {
+    // Una sola notificación por persona y día: las siguientes la reemplazan en vez de sumarse.
+    return {
+      titulo: `${r.persona} tiene la ubicación apagada`,
+      texto: `Registró ${r.tarea ?? 'un dato'} en ${lugar} sin ubicación. Pídele que active la ubicación del teléfono.`,
+      etiqueta: `gps-${r.usuario_id ?? r.persona}`,
+    };
+  }
   return { titulo: `${lugar}: problema en ${r.tarea}`, texto: `${r.nota || 'Sin descripción'}. Informó ${r.persona}.` };
 }
 
@@ -86,7 +94,7 @@ export async function avisarPendientes(token) {
       // A quien informó el problema no hace falta avisarle.
       const destino = (g.suscripciones ?? []).filter((s) => s.usuario_id !== r.usuario_id);
       const t = textoDeRegistro(r);
-      enviadas += await notificar(destino, { ...t, etiqueta: `reg-${r.id}`, urgente: true });
+      enviadas += await notificar(destino, { etiqueta: `reg-${r.id}`, urgente: true, ...t });
     }
   }
   // Seguridad: cada equipo nuevo que entra a un plantel se avisa a sus supervisores.

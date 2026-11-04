@@ -8,7 +8,7 @@ import { diaSemana, diasEntre, fechaCorta, fechaLocal, fechaRelativa, num } from
 export const LIMITE_BLOQUE = { manana: 13, tarde: 20 } as const;
 export const NOMBRE_BLOQUE = { manana: 'Mañana', tarde: 'Tarde' } as const;
 
-export const FLAGS_CRITICOS: Flag[] = ['problema', 'retrocede', 'no_calza', 'ilogico'];
+export const FLAGS_CRITICOS: Flag[] = ['problema', 'retrocede', 'no_calza', 'ilogico', 'gps_apagado'];
 export const FLAGS_CONFIANZA: Flag[] = ['lejos', 'sin_foto', 'omitida', 'temprano'];
 /** Antes de esta hora, una tarea de la tarde se considera registrada antes de tiempo. */
 export const HORA_INICIO_TARDE = 12;
@@ -19,6 +19,7 @@ export const NOMBRE_FLAG: Record<Flag | 'reloj', string> = {
   no_calza: 'Las aves vivas no calzan',
   ilogico: 'Fuera de los límites',
   lejos: 'Lejos del galpón',
+  gps_apagado: 'Ubicación apagada',
   sin_foto: 'Sin foto',
   omitida: 'No se hizo',
   temprano: 'Registrada antes de hora',

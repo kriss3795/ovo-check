@@ -111,6 +111,7 @@ const MENSAJES: Record<string, string> = {
   AVISO_FALLO: 'No se pudo enviar la notificación. Inténtalo de nuevo.',
   SERVIDOR: 'El servidor no pudo completar la operación. Inténtalo de nuevo.',
   OC_BLOQUEO: 'Demasiados intentos. Espera un rato antes de volver a intentarlo.',
+  OC_QR_VENCIDO: 'Ese código QR ya no sirve. Pide uno nuevo.',
   OC_SIN_GRANJA: 'No hay ningún plantel con ese nombre. Escríbelo tal como lo creó tu supervisor.',
   OC_CLAVE_GRANJA: 'Esa no es la clave del plantel. Pídesela a tu supervisor.',
   OC_NOMBRE_USADO: 'Ya existe un plantel con ese nombre. Agrégale algo que lo distinga, por ejemplo la comuna.',

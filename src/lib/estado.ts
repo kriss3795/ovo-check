@@ -14,6 +14,8 @@ export interface Visita {
   lng: number | null;
   precision: number | null;
   abierta: number;
+  /** El teléfono no entregó la ubicación: la tiene apagada o le quitó el permiso a la app. */
+  gpsError?: 'apagada' | 'sin_permiso' | null;
 }
 
 /** Saldo de un artículo en un lugar del inventario. */
@@ -72,6 +74,10 @@ export interface Estado {
   rolIngreso: 'operario' | 'supervisor' | null;
   /** Plantel que la pantalla de entrada trae ya escrito (el de este teléfono, si fue desvinculado). */
   plantelSugerido: string | null;
+  /** Código del QR del plantel con que se abrió la app (…/?unir=CODIGO). */
+  qrUnir: string | null;
+  /** Código del QR de otro equipo que este supervisor va a aprobar (…/?aprobar=CODIGO o escaneado). */
+  qrAprobar: string | null;
   sync: Sync;
   visitas: Record<string, Visita>;
   ruta: Ruta[];
@@ -84,6 +90,24 @@ export interface Estado {
   instalable: boolean;
   /** Ya se descargó una versión nueva de la app: se aplica al recargar. */
   actualizacion: boolean;
+}
+
+/** Lee y quita de la dirección el código de un QR, para que recargar la página no lo vuelva a usar. */
+function qrDeLaDireccion(): { qrUnir: string | null; qrAprobar: string | null } {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    const limpio = (v: string | null) => (v && /^[A-Za-z0-9]{8,16}$/.test(v) ? v.toUpperCase() : null);
+    const r = { qrUnir: limpio(q.get('unir')), qrAprobar: limpio(q.get('aprobar')) };
+    if (q.has('unir') || q.has('aprobar')) {
+      q.delete('unir');
+      q.delete('aprobar');
+      const resto = q.toString();
+      history.replaceState(history.state, '', window.location.pathname + (resto ? `?${resto}` : ''));
+    }
+    return r;
+  } catch {
+    return { qrUnir: null, qrAprobar: null };
+  }
 }
 
 let estado: Estado = {
@@ -106,6 +130,7 @@ let estado: Estado = {
   desvinculado: false,
   rolIngreso: null,
   plantelSugerido: null,
+  ...qrDeLaDireccion(),
   sync: { enLinea: navigator.onLine, ocupado: false, pendientes: 0, fotosPendientes: 0, ultima: null, error: null, cupo: false, freno: null, masAntiguo: null },
   visitas: {},
   ruta: [],
