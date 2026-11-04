@@ -1,33 +1,20 @@
 // Piezas compartidas por las funciones del servidor. (El guion bajo evita que Vercel lo publique como dirección.)
 import webpush from 'web-push';
 
+import { dbLista, llamar } from './_db.js';
+
 const limpio = (v) => String(v ?? '').trim();
-export const URL_BASE = limpio(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL).replace(/\/+$/, '');
-export const SERVICIO = limpio(process.env.SUPABASE_SERVICE_KEY);
 export const VAPID_PUBLICA = limpio(process.env.VAPID_PUBLIC_KEY);
 const VAPID_PRIVADA = limpio(process.env.VAPID_PRIVATE_KEY);
 const CONTACTO = limpio(process.env.GMAIL_USER) || 'ovocheck.avisos@gmail.com';
 
-export const servidorListo = Boolean(URL_BASE && SERVICIO);
+export const servidorListo = dbLista;
 export const avisosListos = Boolean(VAPID_PUBLICA && VAPID_PRIVADA);
+export const FALTA_DB = 'Falta conectar la base de datos en Vercel > Storage';
 
-/** Cabeceras para Supabase. Las claves nuevas (sb_secret_…) van solo en "apikey"; las antiguas (eyJ…) van además como Bearer. */
-export const cabecerasServicio = () => (SERVICIO.startsWith('eyJ') ? { apikey: SERVICIO, Authorization: `Bearer ${SERVICIO}` } : { apikey: SERVICIO });
-
-/** Llama a una función de la base de datos con la clave de servicio. */
+/** Llama a una función de la base de datos (con permisos del servidor). */
 export async function rpc(funcion, p = {}) {
-  const r = await fetch(`${URL_BASE}/rest/v1/rpc/${funcion}`, {
-    method: 'POST',
-    headers: { ...cabecerasServicio(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ p }),
-  });
-  const datos = await r.json().catch(() => null);
-  if (!r.ok) {
-    const e = new Error(String(datos?.message ?? `Supabase respondió ${r.status}`));
-    e.codigo = String(datos?.message ?? '').startsWith('OC_') ? datos.message : 'SERVIDOR';
-    throw e;
-  }
-  return datos;
+  return llamar(funcion, p, {});
 }
 
 /** Los cron de Vercel llegan con esta cabecera si existe la variable CRON_SECRET. */

@@ -3,14 +3,13 @@
 //  2. Los lunes recuerda a los supervisores que descarguen las fotos que se borrarán esa semana.
 //  3. Borra los planteles que alguien creó para probar y dejó abandonados (nunca registraron nada y nadie los abrió en 180 días).
 //  4. Mide el espacio ocupado y, si se está llenando, avisa por correo a quien administra la app.
-//  5. De paso mantiene despierto el proyecto gratuito de Supabase.
 import { USUARIO, correoListo, escapar, transporte } from './_correo.js';
-import { URL_BASE, cabecerasServicio, avisarPendientes, avisosListos, cronAutorizado, notificar, rpc, servidorListo, tocaTurno } from './_comun.js';
+import { FALTA_DB, avisarPendientes, avisosListos, cronAutorizado, notificar, rpc, servidorListo, tocaTurno } from './_comun.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (!cronAutorizado(req)) return res.status(401).json({ error: 'No autorizado' });
-  if (!servidorListo) return res.status(503).json({ error: 'Falta la variable SUPABASE_SERVICE_KEY en Vercel' });
+  if (!servidorListo) return res.status(503).json({ error: FALTA_DB });
   let borradas = 0;
   let dias = null;
   let avisos = 0;
@@ -29,18 +28,9 @@ export default async function handler(req, res) {
         }
       }
     }
-    for (let vuelta = 0; vuelta < 8; vuelta++) {
-      const d = await rpc('oc_fotos_vencidas', { limite: 500 });
-      dias = d.dias;
-      if (!d.nombres?.length) break;
-      const b = await fetch(`${URL_BASE}/storage/v1/object/ovocheck`, {
-        method: 'DELETE',
-        headers: { ...cabecerasServicio(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prefixes: d.nombres }),
-      });
-      if (!b.ok) return res.status(502).json({ error: 'No se pudieron borrar las fotos', detalle: await b.text(), borradas });
-      borradas += d.nombres.length;
-    }
+    const v = await rpc('oc_fotos_borrar_vencidas');
+    dias = v.dias;
+    borradas = v.borradas;
   } catch (e) {
     return res.status(502).json({ error: String(e?.message ?? e), borradas });
   }
@@ -103,7 +93,7 @@ function correoEspacio(u) {
   const mayores = (u.mayores ?? []).map((m) => `${m.nombre}: ${Number(m.registros).toLocaleString('es-CL')} registros, ${mb(m.mb_fotos)} en fotos`);
   const queHacer = [
     'La app se protege sola: al 70 % deja de aceptar planteles nuevos y, si llegara al tope, los registros esperan en cada teléfono sin perderse.',
-    'Para tener más espacio: en supabase.com pasa el proyecto al plan Pro y luego ejecuta en SQL Editor:  select oc_soporte_plan(\'pro\');',
+    'Para tener más espacio: descarga el respaldo y archiva lo antiguo, o pasa la base al plan pagado (Vercel > Storage > la base > Open in Neon) y luego ejecuta en su SQL Editor:  select oc_soporte_plan(\'pro\');',
     'Para ver cuánto ocupa cada plantel:  select * from oc_soporte_uso;',
   ];
   const asunto = lleno

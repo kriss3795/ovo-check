@@ -2,8 +2,8 @@
 //   GET  -> entrega la clave pública que el navegador necesita para suscribirse.
 //   POST -> { token }               avisa a los supervisores los problemas recién informados en esa granja
 //           { token, prueba: true } envía una notificación de prueba al teléfono que la pide
-// Variables en Vercel: VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY (además de las de Supabase).
-import { VAPID_PUBLICA, avisarPendientes, avisosListos, notificar, rpc, servidorListo } from './_comun.js';
+// Variables en Vercel: VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY (además de la base de datos).
+import { FALTA_DB, VAPID_PUBLICA, avisarPendientes, avisosListos, notificar, rpc, servidorListo } from './_comun.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -17,7 +17,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: listo,
       publica: listo ? VAPID_PUBLICA : '',
-      detalle: listo ? 'Configuradas' : !servidorListo ? 'Falta la variable SUPABASE_SERVICE_KEY en Vercel' : 'Faltan las variables VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY en Vercel',
+      detalle: listo ? 'Configuradas' : !servidorListo ? FALTA_DB : 'Faltan las variables VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY en Vercel',
     });
   }
   if (req.method !== 'POST') return res.status(405).json({ error: 'METODO' });

@@ -52,8 +52,8 @@ export function SinNube() {
         <div className="tarjeta aviso-atencion" style={{ textAlign: 'left' }}>
           <p className="fuerte">Falta conectar el servidor</p>
           <p className="chico" style={{ marginTop: 6 }}>
-            La app no encuentra la dirección de Supabase. Agrega las variables VITE_SUPABASE_URL y VITE_SUPABASE_KEY (paso 3
-            del archivo LEEME) y vuelve a publicar.
+            La app no encuentra la base de datos. En Vercel, entra a Storage y conecta la base al proyecto (paso 3 del archivo
+            LEEME); luego vuelve a publicar.
           </p>
         </div>
       </div>

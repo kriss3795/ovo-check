@@ -933,7 +933,7 @@ export async function sincronizar(forzar = false): Promise<void> {
         continue;
       }
       try {
-        const r = await subirFoto(granjaId, f.id, f.blob);
+        const r = await subirFoto(token, granjaId, f.id, f.blob);
         if (r === 'cupo') {
           reintentarLuego(c, 'cupo');
           contarCola();
@@ -1065,8 +1065,8 @@ export async function diagnostico(): Promise<{ paso: string; ok: boolean; detall
     const blob: Blob = await new Promise((ok) => lienzo.toBlob((b) => ok(b!), 'image/jpeg', 0.5));
     const id = `prueba-${uid()}`;
     await rpc('oc_permitir_prueba', { token: e.dispositivo!.token, foto: id });
-    const r = await subirFoto(e.config!.granja.id, id, blob);
-    pasos.push({ paso: 'Subida de fotos', ok: r === 'ok', detalle: r === 'ok' ? 'El servidor acepta fotos' : 'El servidor rechazó la foto: cupo lleno o falta la regla de almacenamiento' });
+    const r = await subirFoto(e.dispositivo!.token, e.config!.granja.id, id, blob);
+    pasos.push({ paso: 'Subida de fotos', ok: r === 'ok', detalle: r === 'ok' ? 'El servidor acepta fotos' : 'El servidor rechazó la foto: el espacio para fotos está lleno' });
   } catch (err) {
     pasos.push({ paso: 'Subida de fotos', ok: false, detalle: mensajeError(err) });
   }
