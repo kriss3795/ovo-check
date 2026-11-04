@@ -1974,3 +1974,41 @@ table.datos td.falta {
   accent-color: var(--verde);
   flex: none;
 }
+.solo-imprimir {
+  display: none;
+}
+@media print {
+  body:not(.imprimiendo) .pestanas,
+  body:not(.imprimiendo) .cabecera-sup,
+  body:not(.imprimiendo) .no-imprimir,
+  body:not(.imprimiendo) .version-nueva {
+    display: none !important;
+  }
+  body:not(.imprimiendo) .solo-imprimir {
+    display: block;
+  }
+  body:not(.imprimiendo) {
+    background: #fff;
+  }
+  body:not(.imprimiendo) .sup-cuerpo {
+    max-width: none;
+    padding: 0;
+  }
+  .grafico,
+  .tabla-wrap {
+    break-inside: avoid;
+  }
+  .prod-graficos {
+    grid-template-columns: 1fr 1fr;
+  }
+  .tabla-wrap {
+    overflow: visible;
+  }
+  table.datos {
+    font-size: 11px;
+  }
+  table.datos th,
+  table.datos td {
+    padding: 4px 6px;
+  }
+}

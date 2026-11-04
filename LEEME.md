@@ -72,7 +72,11 @@ La primera pantalla tiene dos botones: **Soy operario** y **Soy supervisor**.
 
 **Supervisor.** Entra con su correo y su clave, desde cualquier teléfono o computador. Solo desde ahí se crea un plantel: quien lo crea queda como supervisor y elige el nombre del plantel, su propia clave y la **clave del plantel** que usarán sus operarios.
 
-**Operario.**
+**Operario, con QR (lo más fácil).** El supervisor abre **Ajustes > Sumar un teléfono** y le muestra el QR (o se lo envía por WhatsApp, o lo imprime y lo pega en la sala). El operario lo escanea con la cámara de su teléfono, o en la app con **Soy operario > Escanear el QR del plantel**, y queda dentro: elige su nombre y crea su PIN. El QR vence a los 30 días y se puede cambiar cuando se quiera (el anterior deja de servir; los teléfonos que ya entraron siguen funcionando).
+
+**Supervisor en el computador, con el celular.** En el computador, **Soy supervisor** muestra un QR que dura 3 minutos. Desde el celular, ya dentro de la app, se toca **Ajustes > Entrar en un computador**, se escanea y se confirma: el computador queda con la sesión de ese supervisor, sin escribir la clave.
+
+**Operario, sin QR.**
 1. Escribe el nombre exacto del plantel (no importan mayúsculas ni tildes). No existe ninguna lista de planteles: quien no sabe el nombre no lo encuentra.
 2. Escribe la clave del plantel. Se hace una sola vez en cada teléfono.
 3. Elige su nombre y crea su propio PIN de 4 números. Desde entonces entra solo con su nombre y su PIN.
@@ -108,8 +112,21 @@ Las tareas clásicas de postura vienen cargadas: temperatura mínima y máxima, 
 - **Alertas:** problemas informados, lecturas de medidor menores que la anterior, aves vivas que no calzan con la mortalidad y mediciones fuera de lo lógico, para marcarlas como revisadas.
 - **Cómo se calculó:** al abrir cualquier registro con un indicador se ve la cuenta completa, por ejemplo "91,2 % de postura = 10.032 huevos ÷ 11.000 aves × 100", la resta de lecturas del medidor, la relación agua/alimento del día, y de dónde salió el número de aves.
 - **Historial:** cualquier día anterior, y un resumen por tarea (fechas por galpón) con los indicadores calculados: consumo del día, ml por ave, g por ave, % de postura.
-- **Descargar datos:** todos los registros en un archivo que abre en Excel.
+- **Descargar datos:** un Excel para la gerencia con las hojas que se elijan (resumen diario por galpón, semanal con la guía genética, alertas con su motivo y el detalle de cada registro), o solo los registros en CSV.
 - **Descargar fotos:** un archivo .zip con las fotos, ordenadas por día y galpón.
+
+---
+
+## Producción y curvas genéticas
+
+En **Ajustes > Galpones > el galpón** se indican la **línea genética** (Hy-Line Brown, W-36, W-80, Lohmann Brown-Classic o LSL-Classic) y la **fecha de nacimiento del lote**. Con eso:
+
+- La pestaña **Producción** muestra, semana a semana de vida, la postura, el alimento y el agua por ave, la mortalidad acumulada y los pesos de huevo y de ave, con la curva de la guía genética punteada al lado; una tabla semanal (con masa de huevo) y otra para comparar los galpones.
+- Llegan alertas (solo al supervisor) cuando la postura del día queda más de 5 puntos bajo la guía, el alimento por ave se aleja más de 15 %, o el peso de huevo o el peso vivo quedan bajo el estándar.
+
+Las curvas salen de las guías de cada empresa genética (punto medio de sus rangos; el alimento de Lohmann es estimado). Cada plantel ajusta sus límites en Ajustes > Alertas de mediciones.
+
+**Detectores de datos mal anotados** (avisan al supervisor, nunca al operario): un número 5 veces mayor o menor que lo habitual (un dígito de más, o un punto en vez de coma), el mismo número de huevos cuatro días seguidos, la postura que cae 3 puntos o más contra el promedio de los días anteriores, la relación agua/alimento fuera de 1,5 a 3 L/kg (el tope sube con calor sobre 28 °C), medidor que retrocede, mínima mayor que la máxima, aves vivas que no calzan, y registros hechos con la ubicación apagada. Con varias recolecciones al día la postura se juzga con el total del día. En recría o en galpones chicos no se usan los límites de ponedora adulta.
 
 ---
 
@@ -199,6 +216,15 @@ Situaciones del día a día:
 - **Los recordatorios salen una vez por turno**, aunque alguien abra su dirección a propósito muchas veces.
 
 Límite conocido: el PIN del operario es de 4 números y se comprueba en el teléfono para poder trabajar sin señal. Sirve para firmar en un teléfono compartido; no es una clave fuerte.
+
+---
+
+## Datos personales (Ley 21.719)
+
+- Al crear su PIN, cada operario ve qué datos se guardan y para qué; la app anota la fecha.
+- El supervisor puede descargar los registros de una persona (acceso y portabilidad) en Ajustes > Personas > la persona > Sus datos personales.
+- Si la persona ya no trabaja en el plantel y lo pide, el supervisor la da de baja y toca **Borrar sus datos personales**: su nombre y la ubicación desaparecen de todos sus registros y se borran sus fotos. Los números de producción se conservan sin su nombre, por trazabilidad sanitaria. Queda anotado en la bitácora.
+- La política de privacidad (`/privacidad.html`) explica quién es responsable, la base legal, la seguridad y los derechos.
 
 ---
 

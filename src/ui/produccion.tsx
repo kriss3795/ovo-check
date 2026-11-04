@@ -1,5 +1,6 @@
 // Producción: cada galpón contra la curva de su línea genética, semana a semana, y todos los galpones lado a lado.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Printer } from 'lucide-react';
 import { asegurarPeriodo } from '../lib/app';
 import { ir, useEstado } from '../lib/estado';
 import { lineaPorId, semanaTexto, edadSemanas } from '../lib/estandar';
@@ -55,8 +56,16 @@ export function Produccion() {
   return (
     <div className="produccion">
       <header className="prod-cabeza">
-        <h2 className="titulo">Producción</h2>
-        <div className="prod-filtros" role="group" aria-label="Galpón y período">
+        <div className="linea-h entre">
+          <h2 className="titulo">Producción</h2>
+          <button className="boton chico no-imprimir" onClick={() => window.print()}>
+            <Printer size={18} aria-hidden /> Imprimir o guardar PDF
+          </button>
+        </div>
+        <p className="solo-imprimir">
+          {config.granja.nombre}, {g.nombre}. Informe del {fechaCorta(desde)} al {fechaCorta(hoy)}.
+        </p>
+        <div className="prod-filtros no-imprimir" role="group" aria-label="Galpón y período">
           <label className="campo-linea">
             <span>Galpón</span>
             <select className="entrada" value={g.id} onChange={(e) => setGid(e.target.value)}>
