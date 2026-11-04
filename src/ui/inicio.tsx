@@ -105,7 +105,7 @@ export function Bienvenida() {
 }
 
 /** Demostración: un plantel de ejemplo con seis semanas de datos, para conocer la app sin operarios. */
-function BotonDemo() {
+function BotonDemo({ conPlantel = false }: { conPlantel?: boolean }) {
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState('');
   return (
@@ -126,7 +126,10 @@ function BotonDemo() {
       >
         <PlayCircle size={22} aria-hidden /> {ocupado ? 'Preparando la demostración…' : 'Ver una demostración'}
       </button>
-      <p className="chico suave">Un plantel de ejemplo con seis semanas de datos inventados. Puedes verlo como supervisor y como operario.</p>
+      <p className="chico suave">
+        Un plantel de ejemplo con seis semanas de datos inventados. Puedes verlo como supervisor y como operario.
+        {conPlantel && ' Al salir, vuelves a tu plantel entrando con tu correo o con el QR; tus datos siguen guardados.'}
+      </p>
       {error && <p className="error-texto">{error}</p>}
     </div>
   );
@@ -765,6 +768,7 @@ export function Ingreso() {
           <AvisoSinEnviar />
           <ElegirRol alElegir={elegirRol} />
           <BotonInstalar />
+          <BotonDemo conPlantel />
           <button className="enlace gris" style={{ alignSelf: 'center', marginTop: 'auto' }} onClick={() => poner({ fase: 'bienvenida' })}>
             Entrar a otro plantel
           </button>
@@ -1193,6 +1197,7 @@ export function Desvinculado() {
         <button className="enlace" disabled={ocupado} onClick={comprobar}>
           {ocupado ? 'Comprobando…' : 'Ya lo permitió: comprobar ahora'}
         </button>
+        <BotonDemo />
       </div>
     </div>
   );
