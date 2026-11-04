@@ -94,7 +94,7 @@ Si el supervisor quiere una prueba de que el operario estuvo en cada galpón, pu
 
 ## Demostración
 
-En la primera pantalla, **Ver una demostración** abre un plantel de ejemplo con tres galpones (Hy-Line Brown, Lohmann Brown y Lohmann LSL) y seis semanas de datos inventados, con alertas reales: un golpe de calor, niples tapados, una fuga informada. Una franja abajo permite **ver la app como operario o como supervisor** con un toque, y **Salir**. No hace falta crear nada ni tener operarios. Cada demostración se borra sola a las 24 horas y no ocupa cupos.
+En la primera pantalla, **Ver una demostración** abre un plantel de ejemplo con tres galpones (Hy-Line Brown, Lohmann Brown y Lohmann LSL) y seis semanas de datos inventados, con alertas reales: un golpe de calor, niples tapados, una fuga informada. Los controles de la demostración (ver como operario o como supervisor, y **Salir**) van al pie del menú en el computador y en una franja delgada arriba en el celular, sin tapar nada. No hace falta crear nada ni tener operarios. Cada demostración se borra sola a las 24 horas y no ocupa cupos.
 
 ---
 
@@ -133,6 +133,12 @@ En **Ajustes > Galpones > el galpón** se indican la **línea genética** (Hy-Li
 Las curvas salen de las guías de cada empresa genética (punto medio de sus rangos; el alimento de Lohmann es estimado). Cada plantel ajusta sus límites en Ajustes > Alertas de mediciones.
 
 **Detectores de datos mal anotados** (avisan al supervisor, nunca al operario): un número 5 veces mayor o menor que lo habitual (un dígito de más, o un punto en vez de coma), el mismo número de huevos cuatro días seguidos, la postura que cae 3 puntos o más contra el promedio de los días anteriores, la relación agua/alimento fuera de 1,5 a 3 L/kg (el tope sube con calor sobre 28 °C), medidor que retrocede, mínima mayor que la máxima, aves vivas que no calzan, y registros hechos con la ubicación apagada. Con varias recolecciones al día la postura se juzga con el total del día. En recría o en galpones chicos no se usan los límites de ponedora adulta.
+
+---
+
+## Planilla
+
+La pestaña **Planilla** muestra todo como una hoja de cálculo: un renglón por galpón y día (o por semana), con semana de vida, aves, muertas, mortalidad diaria y acumulada, huevos, postura contra la guía genética, agua y alimento (totales y por ave), relación agua/alimento, temperaturas y alertas. Arriba, el resumen del período; abajo, la fila de totales y promedios. Se ordena tocando el título de cada columna, se filtra por galpón y período, marca en rojo lo que se aleja de la guía o de los límites (en ámbar lo que conviene mirar), y cada fila abre el detalle de ese galpón ese día. El botón **Descargar Excel** baja lo mismo, más las alertas.
 
 ---
 
