@@ -92,6 +92,12 @@ Si el supervisor quiere una prueba de que el operario estuvo en cada galpón, pu
 
 ---
 
+## Demostración
+
+En la primera pantalla, **Ver una demostración** abre un plantel de ejemplo con tres galpones (Hy-Line Brown, Lohmann Brown y Lohmann LSL) y seis semanas de datos inventados, con alertas reales: un golpe de calor, niples tapados, una fuga informada. Una franja abajo permite **ver la app como operario o como supervisor** con un toque, y **Salir**. No hace falta crear nada ni tener operarios. Cada demostración se borra sola a las 24 horas y no ocupa cupos.
+
+---
+
 ## Primer uso en un plantel
 
 1. El supervisor crea el plantel.

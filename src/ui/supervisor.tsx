@@ -163,7 +163,7 @@ function PrimerosPasos() {
     tareas: Boolean(vistos.tareas),
     telefonos: dispositivos.length > 1,
   };
-  if (oculto || PASOS_INICIO.every((p) => listo[p.id])) return null;
+  if (oculto || (config as any).demo || PASOS_INICIO.every((p) => listo[p.id])) return null;
   return (
     <section className="tarjeta">
       <div className="linea-h entre">

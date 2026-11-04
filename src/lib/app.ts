@@ -283,6 +283,41 @@ export async function crearGranja(d: {
   await abrirSesion(u);
 }
 
+/** Abre un plantel de demostración con seis semanas de datos de ejemplo (se borra solo al día siguiente). */
+export async function entrarDemo(nombreDisp: string) {
+  exigirColaVacia();
+  const { armarDemo } = await import('./demo');
+  const { config, registros } = await armarDemo(ahora());
+  const r = await rpc('oc_demo_crear', { config, registros, dispositivo: nombreDisp });
+  await instalarGranja(r, nombreDisp);
+  credenciales.sesiones[r.usuario_id] = r.sesion;
+  await idb.guardar('kv', credenciales, 'credenciales');
+  const u = (r.config as Config).usuarios.find((x) => x.id === r.usuario_id)!;
+  await abrirSesion(u);
+}
+
+/** En la demostración se cambia de persona con un toque, para ver la app como operario o como supervisor. */
+export async function verComoDemo(rol: 'operario' | 'supervisor') {
+  const c = leerEstado().config;
+  if (!(c as any)?.demo) return;
+  const u = c!.usuarios.find((x) => x.rol === rol && x.activo);
+  if (u) await abrirSesion(u);
+}
+
+/** Sale de la demostración: se borra todo lo de este equipo y vuelve a la primera pantalla. */
+export async function salirDemo() {
+  const e = leerEstado();
+  if (!(e.config as any)?.demo) return;
+  const sesion = e.usuario ? credenciales.sesiones[e.usuario.id] : undefined;
+  if (sesion && e.dispositivo) rpc('oc_salir', { token: e.dispositivo.token, sesion }).catch(() => {});
+  await idb.vaciarTodo();
+  cola = [];
+  credenciales = { sesiones: {}, hashes: {} };
+  pines = {};
+  contarCola();
+  poner({ config: null, dispositivo: null, usuario: null, registros: [], revisiones: [], visitas: {}, ruta: [], fase: 'bienvenida', version: 0 });
+}
+
 /** El operario busca su plantel por el nombre exacto. No hay lista de planteles. */
 export async function buscarPlantel(nombre: string): Promise<{ nombre: string }> {
   return rpc('oc_buscar_granja', { nombre });
