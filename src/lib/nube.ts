@@ -72,7 +72,7 @@ export async function api<T = any>(ruta: string, cuerpo?: unknown): Promise<T> {
 }
 
 /** Sube una foto. 'cupo' = el servidor no la aceptó por espacio; se reintenta más tarde. */
-export async function subirFoto(token: string, granjaId: string, fotoId: string, blob: Blob): Promise<'ok' | 'cupo'> {
+export async function subirFoto(token: string, granjaId: string, fotoId: string, blob: Blob): Promise<'ok' | 'cupo' | 'sin_registro'> {
   const r = await pedir(
     `${APP}/api/foto?n=${encodeURIComponent(`${granjaId}/${fotoId}.jpg`)}`,
     { method: 'POST', headers: { 'Content-Type': 'image/jpeg', 'x-token': token }, body: blob },
@@ -86,7 +86,8 @@ export async function subirFoto(token: string, granjaId: string, fotoId: string,
     /* sin JSON */
   }
   const msg = String(cuerpo?.message ?? '');
-  if (r.status === 507 || msg === 'OC_CUPO' || msg === 'OC_FOTO_SIN_REGISTRO') return 'cupo';
+  if (msg === 'OC_FOTO_SIN_REGISTRO') return 'sin_registro';
+  if (r.status === 507 || msg === 'OC_CUPO') return 'cupo';
   if (msg === 'OC_TOKEN') throw new ErrorNube('OC_TOKEN');
   if (r.status >= 500 || r.status === 429 || !cuerpo) throw new ErrorNube('RED', 'El servidor no respondió', true);
   throw new ErrorNube('FOTO', msg || `Error ${r.status}`);

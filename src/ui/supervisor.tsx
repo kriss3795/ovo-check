@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ChartLine,
   Ban, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Download, History, House, MapPin, Pencil,
   Settings, ShieldAlert, Smartphone, TriangleAlert, CircleX, Images,
 } from 'lucide-react';
 import { administrar, ahora, asegurarPeriodo, guardarConfig, revisar, traerPeriodo } from '../lib/app';
 import { avisar, cambiarRuta, ir, useEstado } from '../lib/estado';
 import { armarCsv, entregarArchivo } from '../lib/exportar';
+import { HOJAS, armarExcel, type Hoja as HojaExcel } from '../lib/excel';
 import { anotarBajada, descargarFotos, fotosDe, fotosPorVencer, nombreFoto } from '../lib/fotos';
 import {
-  FLAGS_CRITICOS, Indice, NOMBRE_BLOQUE, NOMBRE_FLAG, avanceGalpon, comoSeCalculo, conjuntoRevisadas, cuadreAves, decimalesIndicador, esCritico, esDudoso,
+  FLAGS_CRITICOS, Indice, valorPar, NOMBRE_BLOQUE, NOMBRE_FLAG, avanceGalpon, comoSeCalculo, conjuntoRevisadas, cuadreAves, decimalesIndicador, esCritico, esDudoso,
   evaluarCampo, flagsDe, indicadoresTexto, momento, relojMalo, resumen, tareasDe, vigenteEn,
 } from '../lib/logica';
 import { mensajeError } from '../lib/nube';
@@ -17,6 +19,7 @@ import type { Config, Galpon, RegistroLocal, Tarea } from '../lib/tipos';
 import { distancia, duracion, fechaCorta, fechaHora, fechaLarga, fechaRelativa, haceCuanto, hora, mayuscula, num, sumarDias } from '../lib/util';
 import { AvisoServidor, AvisoSinEnviar, Barra, Envio, Foto, Hoja, Huevo, IconoTarea, Vacio, VisorFoto } from './base';
 import { Ajustes } from './ajustes';
+import { Produccion } from './produccion';
 import { TarjetaAvisos } from './avisos';
 import { EtiquetaEstado, Falta, useIndice } from './operario';
 
@@ -47,6 +50,7 @@ function usePendientes() {
 const PESTANAS = [
   { id: 'hoy', nombre: 'Hoy', C: House },
   { id: 'alertas', nombre: 'Alertas', C: Bell },
+  { id: 'produccion', nombre: 'Producción', C: ChartLine },
   { id: 'historial', nombre: 'Historial', C: History },
   { id: 'ajustes', nombre: 'Ajustes', C: Settings },
 ] as const;
@@ -71,6 +75,7 @@ export function Supervisor({ tab }: { tab: string }) {
         <main className="sup-cuerpo">
           {tab === 'hoy' && <Hoy />}
           {tab === 'alertas' && <Alertas />}
+          {tab === 'produccion' && <Produccion />}
           {tab === 'historial' && <Historial />}
           {tab === 'ajustes' && <Ajustes />}
         </main>
@@ -630,6 +635,12 @@ function FilaRegistro({ r, conGalpon = true, conFecha = true }: { r: RegistroLoc
         <span className="fila-detalle" style={{ display: 'block' }}>
           {[conGalpon && nombreGalpon(config, r), conFecha ? `${fechaRelativa(r.fecha)} ${hora(momento(r))}` : hora(momento(r))].filter(Boolean).join(', ')}
         </span>
+        {(r.avisos?.length ?? 0) > 0 && flags.includes('ilogico') && (
+          <span className="fila-motivo">
+            {r.avisos![0]}
+            {r.avisos!.length > 1 && <span className="suave"> (y {r.avisos!.length - 1} más)</span>}
+          </span>
+        )}
         {flags.length > 0 && (
           <span className="etiquetas" style={{ marginTop: 6 }}>
             {flags.map((f) => (
@@ -892,12 +903,14 @@ function ResumenTarea() {
     const r = indice.vigente(f, g.id, op.tarea.id);
     if (!r) return { texto: '', mal: false, id: null as string | null };
     if (r.omitida) return { texto: 'No se hizo', mal: false, id: r.id };
-    const v = r.valores[op.i];
+    // El dato se busca por nombre en la copia de la tarea que guardó cada registro (la tarea pudo cambiar después).
+    const v = valorPar(r, c, op.i);
     let x: number | null | undefined = v;
     if (c.acumulativo) {
       // Medidor: se recalcula con la lectura anterior vigente, así una corrección de ayer arregla también el consumo de hoy.
       const prev = indice.anterior(f, g.id, op.tarea.id);
-      const ev = evaluarCampo(c, v, r.aves !== undefined ? { ...g, aves: r.aves } : g, prev && prev.valores[op.i] != null ? { valor: prev.valores[op.i]!, fecha: prev.fecha } : null, f);
+      const pv = valorPar(prev, c, op.i);
+      const ev = evaluarCampo(c, v, r.aves !== undefined ? { ...g, aves: r.aves } : g, prev && pv != null ? { valor: pv, fecha: prev.fecha } : null, f);
       // Registros anteriores a esta versión no guardaban las aves del día: se usa el indicador que se calculó entonces.
       x = !conIndicador ? ev.base : r.aves === undefined && r.indicadores?.[op.i] != null ? r.indicadores[op.i] : ev.indicador;
     } else if (conIndicador) x = r.indicadores?.[op.i];
@@ -972,14 +985,17 @@ export function HojaExportar({ cerrar }: { cerrar: () => void }) {
   const [ocupado, setOcupado] = useState('');
   const [error, setError] = useState('');
   const periodos = [
-    { id: 'hoy', nombre: 'Solo hoy', desde: hoy },
-    { id: '7', nombre: 'Últimos 7 días', desde: sumarDias(hoy, -6) },
-    { id: '30', nombre: 'Últimos 30 días', desde: sumarDias(hoy, -29) },
-    { id: '90', nombre: 'Últimos 90 días', desde: sumarDias(hoy, -89) },
-    { id: 'todo', nombre: 'Todo desde el primer día', desde: '2020-01-01' },
+    { id: 'hoy', nombre: 'Hoy', desde: hoy },
+    { id: '7', nombre: '7 días', desde: sumarDias(hoy, -6) },
+    { id: '30', nombre: '30 días', desde: sumarDias(hoy, -29) },
+    { id: '90', nombre: '90 días', desde: sumarDias(hoy, -89) },
+    { id: 'todo', nombre: 'Todo', desde: '2020-01-01' },
   ];
-  const descargar = async (p: (typeof periodos)[number]) => {
-    setOcupado(p.id);
+  const [pid, setPid] = useState('30');
+  const [hojas, setHojas] = useState<HojaExcel[]>(['diario', 'semanal', 'alertas', 'registros']);
+  const p = periodos.find((x) => x.id === pid)!;
+  const descargar = async (formato: 'xlsx' | 'csv') => {
+    setOcupado(formato);
     setError('');
     try {
       const regs = await traerPeriodo(p.desde, hoy);
@@ -987,12 +1003,21 @@ export function HojaExportar({ cerrar }: { cerrar: () => void }) {
         setError('No hay registros en ese período.');
         return;
       }
-      const nombre = `ovocheck-${nombreArchivo(config.granja.nombre)}-${p.id === 'todo' ? 'completo' : `${p.desde}-a-${hoy}`}.csv`;
-      const r = await entregarArchivo(nombre, armarCsv(config, regs, revisiones));
-      // Si esta descarga cubre todo lo que faltaba respaldar, cuenta como el respaldo del día.
+      const base = `ovocheck-${nombreArchivo(config.granja.nombre)}-${p.id === 'todo' ? 'completo' : `${p.desde}-a-${hoy}`}`;
+      let r: 'descargado' | 'compartido';
+      if (formato === 'xlsx') {
+        if (!hojas.length) return setError('Elige al menos una hoja.');
+        const desde = p.id === 'todo' ? (regs.reduce((m, x) => (x.fecha < m ? x.fecha : m), hoy)) : p.desde;
+        const blob = await armarExcel({ config, registros: regs, revisiones, desde, hasta: hoy, hojas });
+        r = await entregarArchivo(`${base}.xlsx`, blob);
+      } else {
+        r = await entregarArchivo(`${base}.csv`, armarCsv(config, regs, revisiones));
+      }
+      // Si esta descarga trae todos los registros de lo que faltaba respaldar, cuenta como el respaldo del día.
       const ultimo = config.respaldo?.fecha ?? null;
-      if (ultimo ? p.desde <= ultimo : p.id === 'todo') await anotarRespaldo(hoy, usuario.nombre);
-      avisar(r === 'descargado' ? `Archivo descargado con ${regs.length} registros` : 'Archivo listo', 'ok');
+      const completa = formato === 'csv' || hojas.includes('registros');
+      if (completa && (ultimo ? p.desde <= ultimo : p.id === 'todo')) await anotarRespaldo(hoy, usuario.nombre);
+      avisar(r === 'descargado' ? 'Archivo descargado' : 'Archivo listo', 'ok');
       cerrar();
     } catch (e) {
       setError(mensajeError(e));
@@ -1002,15 +1027,31 @@ export function HojaExportar({ cerrar }: { cerrar: () => void }) {
   };
   return (
     <Hoja titulo="Descargar datos" cerrar={cerrar}>
-      <p className="suave">
-        Un archivo que abre en Excel con todos los galpones: cada dato con su fecha, hora, operario y respaldo. Úsalo para llenar tus
-        planillas.
-      </p>
-      {periodos.map((p) => (
-        <button key={p.id} className="boton" disabled={Boolean(ocupado)} onClick={() => descargar(p)}>
-          {ocupado === p.id ? 'Preparando…' : p.nombre}
-        </button>
-      ))}
+      <div className="segmentos" role="group" aria-label="Período">
+        {periodos.map((x) => (
+          <button key={x.id} aria-pressed={pid === x.id} onClick={() => setPid(x.id)}>
+            {x.nombre}
+          </button>
+        ))}
+      </div>
+      <fieldset className="hojas-excel">
+        <legend>Hojas del Excel</legend>
+        {HOJAS.map((h) => (
+          <label key={h.id} className="casilla">
+            <input type="checkbox" checked={hojas.includes(h.id)} onChange={(e) => setHojas((xs) => (e.target.checked ? [...xs, h.id] : xs.filter((y) => y !== h.id)))} />
+            <span>
+              <b>{h.nombre}</b>
+              <span className="chico suave"> {h.detalle}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+      <button className="boton primario" disabled={Boolean(ocupado)} onClick={() => descargar('xlsx')}>
+        <Download size={20} aria-hidden /> {ocupado === 'xlsx' ? 'Preparando…' : 'Descargar Excel'}
+      </button>
+      <button className="boton" disabled={Boolean(ocupado)} onClick={() => descargar('csv')}>
+        {ocupado === 'csv' ? 'Preparando…' : 'Solo los registros (CSV)'}
+      </button>
       {error && <p className="error-texto" role="alert">{error}</p>}
     </Hoja>
   );

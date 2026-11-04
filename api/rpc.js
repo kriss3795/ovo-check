@@ -5,7 +5,7 @@ import { cabecerasDe, cuerpoJson, dbLista, llamar } from './_db.js';
 const PUBLICAS = new Set([
   'oc_crear_granja', 'oc_buscar_granja', 'oc_unirse', 'oc_entrar_supervisor', 'oc_recuperar_correo', 'oc_login', 'oc_crear_pin',
   'oc_cambiar_clave', 'oc_recuperar', 'oc_guardar_config', 'oc_registrar', 'oc_sync', 'oc_registros', 'oc_revisar', 'oc_salir',
-  'oc_permitir_prueba', 'oc_autorizar_operario', 'oc_saldos', 'oc_bitacora_ver', 'oc_admin', 'oc_suscribir', 'oc_invitacion', 'oc_unirse_qr', 'oc_qr_pedir', 'oc_qr_aprobar', 'oc_qr_esperar', 'oc_desuscribir',
+  'oc_permitir_prueba', 'oc_autorizar_operario', 'oc_saldos', 'oc_bitacora_ver', 'oc_admin', 'oc_suscribir', 'oc_invitacion', 'oc_unirse_qr', 'oc_qr_pedir', 'oc_qr_aprobar', 'oc_qr_esperar', 'oc_anonimizar', 'oc_desuscribir',
 ]);
 
 export default async function handler(req, res) {
