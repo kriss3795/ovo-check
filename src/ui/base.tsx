@@ -272,7 +272,11 @@ export function Envio({ detalle = false }: { detalle?: boolean }) {
   let clase = '';
   let texto = 'Todo enviado';
   let Icono = CircleCheck;
-  if (!s.enLinea) {
+  if (s.rechazados) {
+    clase = 'pendiente';
+    texto = `${s.rechazados} sin aceptar`;
+    Icono = TriangleAlert;
+  } else if (!s.enLinea) {
     clase = total ? 'pendiente' : 'sin-senal';
     texto = total ? `Sin señal, ${total} por enviar` : 'Sin señal';
     Icono = CloudOff;

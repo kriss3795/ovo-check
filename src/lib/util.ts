@@ -138,3 +138,17 @@ export function iniciales(nombre: string): string {
 }
 
 export const mayuscula = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
+/**
+ * Número escrito a la chilena o con el teclado del teléfono: "1.380" = mil trescientos ochenta, "1,5" = uno coma cinco,
+ * "1.380,5" = mil trescientos ochenta coma cinco, y "12.5" (punto que no separa miles) = doce coma cinco.
+ */
+export function leerNumero(texto: string): number | null {
+  let t = texto.trim().replace(/\s/g, '');
+  if (t === '') return null;
+  if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
+  else if (/^-?\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, '');
+  if (!/^-?\d*\.?\d+$/.test(t)) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}

@@ -41,6 +41,8 @@ export interface Sync {
   cupo: boolean;
   /** Desde cuándo espera el dato más antiguo que sigue solo en este teléfono (ms), o null si no hay. */
   masAntiguo: number | null;
+  /** Registros que el servidor no aceptó (quedan solo en este teléfono, a la vista). */
+  rechazados: number;
   /** El servidor no está recibiendo registros: 'lleno' = sin espacio; 'tope' = el plantel llegó a su máximo diario. */
   freno: 'lleno' | 'tope' | null;
 }
@@ -131,7 +133,7 @@ let estado: Estado = {
   rolIngreso: null,
   plantelSugerido: null,
   ...qrDeLaDireccion(),
-  sync: { enLinea: navigator.onLine, ocupado: false, pendientes: 0, fotosPendientes: 0, ultima: null, error: null, cupo: false, freno: null, masAntiguo: null },
+  sync: { enLinea: navigator.onLine, ocupado: false, pendientes: 0, fotosPendientes: 0, ultima: null, error: null, cupo: false, freno: null, masAntiguo: null, rechazados: 0 },
   visitas: {},
   ruta: [],
   aviso: null,

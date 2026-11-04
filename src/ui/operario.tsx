@@ -5,7 +5,7 @@ import {
 import { abrirVisita, ahora, guardarRegistro, salir, ubicar, visitaVigente, type FotoNueva } from '../lib/app';
 import { avisar, cerrarPantalla, ir, leerEstado, useEstado, volver } from '../lib/estado';
 import {
-  HORA_INICIO_TARDE, Indice, reiniciosDe, LIMITE_BLOQUE, NOMBRE_BLOQUE, avanceGalpon, avesPara, avisosLogicos, conjuntoRevisadas, cuadreAves, evaluarCampo, resumen, tareasDe,
+  HORA_INICIO_TARDE, Indice, reiniciosDe, LIMITE_BLOQUE, NOMBRE_BLOQUE, avanceGalpon, avesPara, avisosLogicos, valorPar, conjuntoRevisadas, cuadreAves, evaluarCampo, resumen, tareasDe,
 } from '../lib/logica';
 import { CATEGORIAS_PROBLEMA, MOTIVOS_CORREGIR, MOTIVOS_OMITIR } from '../lib/plantillas';
 import type { Flag, Galpon, Registro, Tarea } from '../lib/tipos';
@@ -426,7 +426,7 @@ export function FlujoTarea(p: { galpon: string; tarea?: string; corrige?: string
   // Las aves con que se calculan los indicadores son las últimas aves vivas anotadas; si no hay, las de la ficha.
   const usadas = avesPara(indice, galpon, fecha, tarea.campos, valores);
   const evaluar = (i: number) =>
-    evaluarCampo(tarea.campos[i], valores[i], { ...galpon, aves: usadas.aves }, previo && previo.valores[i] != null ? { valor: previo.valores[i]!, fecha: previo.fecha } : null, fecha);
+    evaluarCampo(tarea.campos[i], valores[i], { ...galpon, aves: usadas.aves }, previo && valorPar(previo, tarea.campos[i], i) != null ? { valor: valorPar(previo, tarea.campos[i], i)!, fecha: previo.fecha } : null, fecha);
   const fotosTomadas = fotos.filter((f): f is FotoNueva => Boolean(f));
   const marca = (i: number) => () => lineasMarca(galpon.nombre, tarea.nombre, tarea.fotoEtiquetas[i] ?? 'Foto', usuario.nombre, regId, galpon.id);
 

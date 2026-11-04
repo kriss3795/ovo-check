@@ -69,8 +69,9 @@ export const haySesionSupervisor = () => Boolean(sesionDe(leerEstado().usuario))
 
 function contarCola() {
   ponerSync({
-    pendientes: cola.filter((c) => c.tipo !== 'foto').length,
-    fotosPendientes: cola.filter((c) => c.tipo === 'foto').length,
+    pendientes: cola.filter((c) => c.tipo !== 'foto' && c.error !== 'rechazado').length,
+    fotosPendientes: cola.filter((c) => c.tipo === 'foto' && c.error !== 'rechazado').length,
+    rechazados: cola.filter((c) => c.error === 'rechazado').length,
     cupo: cola.some((c) => c.tipo === 'foto' && c.error === 'cupo'),
     masAntiguo: cola.length ? Math.min(...cola.map((c) => c.creado)) : null,
   });
@@ -207,7 +208,7 @@ function latido() {
   const hace = Date.now() - (e.sync.ultima ?? 0);
   const esSup = e.usuario?.rol === 'supervisor';
   const frenado = Date.now() < frenoHasta;
-  const hayCola = cola.some((c) => (c.tipo === 'registro' ? !frenado && c.error !== 'sesion' : !c.proximo || c.proximo <= Date.now()));
+  const hayCola = cola.some((c) => c.error !== 'rechazado' && (c.tipo === 'registro' ? !frenado && c.error !== 'sesion' : !c.proximo || c.proximo <= Date.now()));
   if (hayCola || hace > (esSup ? 25000 : 180000)) sincronizar();
 }
 
@@ -333,6 +334,19 @@ export async function aprobarQrEntrada(codigo: string): Promise<string> {
   try {
     const r = await rpc('oc_qr_aprobar', { token: e.dispositivo!.token, sesion: sesionDe(e.usuario), codigo });
     return r.dispositivo || 'el otro equipo';
+  } catch (err) {
+    manejarErrorSesion(err);
+    throw err;
+  }
+}
+
+/** Supervisor: borra el nombre y la ubicación de una persona dada de baja en todos sus registros (Ley 21.719). */
+export async function anonimizarPersona(usuarioId: string): Promise<{ registros: number }> {
+  const e = leerEstado();
+  try {
+    const r = await rpc('oc_anonimizar', { token: e.dispositivo!.token, sesion: sesionDe(e.usuario), usuario_id: usuarioId });
+    sincronizar(true);
+    return r;
   } catch (err) {
     manejarErrorSesion(err);
     throw err;
@@ -913,7 +927,7 @@ export async function sincronizar(forzar = false): Promise<void> {
       const sesionReg = sesionDe(quien);
       const porId = new Map(leerEstado().registros.map((r) => [r.id, r]));
       const lote = cola
-        .filter((x) => x.tipo === 'registro' && (x.error !== 'sesion' || (Boolean(sesionReg) && porId.get(x.ref)?.usuario_id === quien?.id)))
+        .filter((x) => x.tipo === 'registro' && x.error !== 'rechazado' && (x.error !== 'sesion' || (Boolean(sesionReg) && porId.get(x.ref)?.usuario_id === quien?.id)))
         .slice(0, 40);
       if (!lote.length) break;
       const enEspera = new Set<string>();
@@ -937,6 +951,18 @@ export async function sincronizar(forzar = false): Promise<void> {
           throw err;
         }
         for (const x of (r.rechazados ?? []) as { id: string; motivo: string }[]) if (x.motivo === 'sesion') enEspera.add(x.id);
+        // Lo que el servidor no aceptó por otro motivo (sin permiso para esa área, datos dañados…) NO se borra:
+        // queda en este teléfono marcado y a la vista, para que nadie crea que llegó.
+        const aceptados = new Set((r.resultados as any[]).map((x) => x.id));
+        const enviados = new Set(items.map((x) => x.registro.id));
+        const motivos = new Map(((r.rechazados ?? []) as { id: string; motivo: string }[]).map((x) => [x.id, x.motivo]));
+        for (const c of lote) {
+          if (!enviados.has(c.ref) || aceptados.has(c.ref) || enEspera.has(c.ref)) continue;
+          c.error = 'rechazado';
+          c.motivo = motivos.get(c.ref) ?? 'datos';
+          enEspera.add(c.ref);
+          await idb.guardar('cola', c);
+        }
         anotarHora(r.ahora);
         const confirmados: RegistroLocal[] = [];
         for (const res of r.resultados as any[]) {
@@ -952,7 +978,7 @@ export async function sincronizar(forzar = false): Promise<void> {
       }
       await desencolar(lote.filter((c) => !enEspera.has(c.ref)).map((c) => c.id));
       if (enEspera.size) {
-        for (const c of lote.filter((x) => enEspera.has(x.ref))) {
+        for (const c of lote.filter((x) => enEspera.has(x.ref) && x.error !== 'rechazado')) {
           c.error = 'sesion';
           await idb.guardar('cola', c);
         }
@@ -972,8 +998,14 @@ export async function sincronizar(forzar = false): Promise<void> {
       }
     }
 
-    // 4. Traer lo nuevo
-    await traer(token);
+    // 4. Traer lo nuevo. Si falla por algo que no sea la señal, igual se suben las fotos y el error se informa al final.
+    let errorTraer: unknown = null;
+    try {
+      await traer(token);
+    } catch (err) {
+      if (err instanceof ErrorNube && (err.red || err.codigo === 'OC_TOKEN' || err.codigo === 'OC_SESION')) throw err;
+      errorTraer = err;
+    }
 
     // 5. Fotos, de a una
     const granjaId = leerEstado().config!.granja.id;
@@ -995,6 +1027,14 @@ export async function sincronizar(forzar = false): Promise<void> {
           contarCola();
           continue;
         }
+        if (r === 'sin_registro') {
+          // Su registro nunca llegó al servidor: la foto queda en el teléfono, marcada, sin reintentar para siempre.
+          c.error = 'rechazado';
+          c.motivo = 'sin_registro';
+          await idb.guardar('cola', c);
+          contarCola();
+          continue;
+        }
         await idb.guardar('fotos', { ...f, subida: true });
         await desencolar([c.id]);
       } catch (err) {
@@ -1005,6 +1045,7 @@ export async function sincronizar(forzar = false): Promise<void> {
     }
 
     if (!freno) frenoHasta = 0;
+    if (errorTraer) throw errorTraer;
     ponerSync({ enLinea: true, error: null, ultima: Date.now(), freno });
   } catch (err) {
     if (err instanceof ErrorNube && err.codigo === 'OC_TOKEN') {

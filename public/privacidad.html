@@ -22,18 +22,21 @@
       <li><strong>Personas del plantel:</strong> nombre de cada operario y supervisor, y el correo de los supervisores. El PIN y la clave no se guardan: solo una huella cifrada que permite comprobarlos.</li>
       <li><strong>Registros de trabajo:</strong> los valores anotados (por ejemplo lecturas, conteos y revisiones), quién los registró, la fecha y la hora.</li>
       <li><strong>Fotos de respaldo:</strong> las que se toman dentro de la app al registrar una tarea o informar un problema. La app no accede a la galería del teléfono.</li>
-      <li><strong>Ubicación:</strong> si se autoriza, la posición aproximada del teléfono en el momento de registrar, para comprobar que el registro se hizo en el galpón. No se sigue la ubicación en otros momentos ni con la app cerrada.</li>
+      <li><strong>Ubicación:</strong> la posición aproximada del teléfono en el momento de registrar, para comprobar que el registro se hizo en el galpón. No se sigue la ubicación en otros momentos ni con la app cerrada. Si la ubicación está apagada, el registro se guarda igual y el supervisor recibe un aviso.</li>
       <li><strong>Equipos que usan la app:</strong> el tipo de equipo (por ejemplo, teléfono o computador), cuándo entró al plantel y la última vez que se conectó. Sirve para que el supervisor detecte equipos que no reconoce.</li>
     </ul>
 
-    <h2>Para qué se usan</h2>
-    <p>Únicamente para que el plantel lleve su registro diario: que el supervisor vea las tareas hechas, reciba las alertas y pueda descargar sus datos. No se usan para publicidad ni se venden o comparten con terceros.</p>
+    <h2>Quién es responsable</h2>
+    <p>Cada plantel (la empresa o persona que lo crea en la app) es el responsable de los datos de su personal, conforme a la Ley 21.719 sobre protección de datos personales. Ovo Check los guarda y procesa por encargo del plantel, solo para lo que se describe aquí.</p>
+
+    <h2>Para qué se usan y con qué base</h2>
+    <p>Únicamente para que el plantel lleve su registro diario: que el supervisor vea las tareas hechas, reciba las alertas y pueda descargar sus datos. La base es la relación de trabajo y el interés legítimo del plantel en el control sanitario y la trazabilidad de su producción. Cada persona es informada de esto al crear su PIN, y queda anotado cuándo. No se usan para publicidad ni se venden o comparten con terceros.</p>
 
     <h2>Quién puede verlos</h2>
     <p>Solo las personas del mismo plantel. Los supervisores ven todos los registros de su plantel; los operarios ven las tareas del día en su teléfono. Cada plantel está separado de los demás y no existe ninguna lista pública de planteles.</p>
 
     <h2>Dónde y cuánto tiempo se guardan</h2>
-    <p>Los datos se guardan en el teléfono y en un servidor en la nube (base de datos Neon, publicada con Vercel). Las fotos se conservan 30 días y luego se borran automáticamente; los valores registrados se conservan mientras el plantel use el servicio. Un plantel que nunca registró nada y que nadie abre durante 180 días se elimina automáticamente, después de avisar por correo a sus supervisores con 30 días de anticipación. El supervisor puede descargar los datos de su plantel en cualquier momento.</p>
+    <p>Los datos se guardan en el teléfono y en un servidor en la nube (base de datos Neon en São Paulo, Brasil, y la app publicada con Vercel), con conexión cifrada y almacenamiento cifrado. Las fotos se conservan 30 días y luego se borran automáticamente; los valores registrados se conservan mientras el plantel use el servicio. Un plantel que nunca registró nada y que nadie abre durante 180 días se elimina automáticamente, después de avisar por correo a sus supervisores con 30 días de anticipación. El supervisor puede descargar los datos de su plantel en cualquier momento.</p>
 
     <h2>Permisos que pide la app</h2>
     <ul>
@@ -41,6 +44,17 @@
       <li><strong>Ubicación:</strong> para anotar dónde se hizo cada registro. Es opcional: si se rechaza, la app funciona igual y el registro queda sin ubicación.</li>
       <li><strong>Notificaciones:</strong> para avisar de problemas y de tareas pendientes. Son opcionales y se pueden desactivar.</li>
     </ul>
+
+    <h2>Cómo se protegen</h2>
+    <ul>
+      <li>Nadie puede leer la base de datos directamente: todo pasa por funciones que comprueban quién pide cada cosa, y cada plantel solo ve lo suyo.</li>
+      <li>Las claves de supervisor y los PIN se guardan cifrados (no se pueden leer). Tras varios intentos fallidos el servidor deja de responder por un rato.</li>
+      <li>Cada equipo nuevo que entra al plantel se avisa al supervisor, que puede desvincularlo al instante.</li>
+      <li>Cada acción importante (cambios de claves, equipos, personas, datos borrados) queda anotada en una bitácora.</li>
+    </ul>
+
+    <h2>Tus derechos</h2>
+    <p>Puedes pedir acceder a tus datos, corregirlos, llevártelos (portabilidad), oponerte a su uso o que se eliminen. Pídeselo a tu supervisor: desde la app puede descargar tus registros en un archivo y, si ya no trabajas en el plantel, borrar tus datos personales (tu nombre y la ubicación quedan fuera de todos tus registros, y se borran tus fotos; los números de producción se conservan sin tu nombre para la trazabilidad sanitaria). Si no te responde, escribe a <a href="mailto:ovocheck.avisos@gmail.com">ovocheck.avisos@gmail.com</a>.</p>
 
     <h2>Eliminar los datos</h2>
     <p>Un supervisor puede eliminar personas, galpones y tareas desde la app. También puede eliminar el plantel completo, con todos sus registros y fotos, en Ajustes, Plantel, Eliminar este plantel. Para cualquier consulta sobre privacidad, o si no puedes entrar a la app y quieres que se eliminen tus datos, escribe a <a href="mailto:ovocheck.avisos@gmail.com">ovocheck.avisos@gmail.com</a>.</p>

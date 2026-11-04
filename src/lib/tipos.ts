@@ -14,6 +14,10 @@ export interface Usuario {
   temporal?: boolean;
   /** Áreas que registra un operario. Sin definir = solo galpones. */
   areas?: Area[];
+  /** Cuándo se le informó qué datos guarda la app (al crear su PIN). */
+  informado?: string;
+  /** Sus datos personales se borraron a pedido suyo. */
+  anonimizado?: string;
 }
 
 /** Lo que puede registrar un operario. Cada una corresponde a un módulo que el supervisor prende o apaga. */
@@ -342,6 +346,8 @@ export interface ItemCola {
   creado: number;
   intentos: number;
   error?: string;
+  /** Por qué el servidor no lo aceptó (cuando error = "rechazado"). */
+  motivo?: string;
 }
 
 export interface FotoLocal {

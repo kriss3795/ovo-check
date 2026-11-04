@@ -11,6 +11,7 @@ import {
 } from '../lib/modulos';
 import type { Area, Config, Envases, ItemHuevos, Mov, Registro, RegistroLocal } from '../lib/tipos';
 import { fechaHora, fechaLocal, hora, num, sumarDias, uid } from '../lib/util';
+import { leerNumero } from '../lib/util';
 import { Barra, Confirmado, Envio, FotoBlob, Hoja, useAtras } from './base';
 import { Camara } from './captura';
 import { Falta, useIndice } from './operario';
@@ -21,10 +22,8 @@ const entero = (t: string): number | null => {
   return s === '' ? null : Number(s);
 };
 const decimal = (t: string): number | null => {
-  const s = t.replace(/\./g, '').replace(',', '.').replace(/[^\d.]/g, '');
-  if (s === '' || s === '.') return null;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
+  const n = leerNumero(t);
+  return n != null && n >= 0 ? n : null;
 };
 const texto = (n: number | null | undefined) => (n == null ? '' : String(n).replace('.', ','));
 

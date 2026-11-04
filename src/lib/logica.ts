@@ -3,7 +3,7 @@ import { avisosCurva } from './estandar';
 import type { Campo, Config, Flag, Galpon, Logica, Pausa, Registro, RegistroLocal, Revision, Tarea } from './tipos';
 import { tareaParaGalpon } from './modulos';
 import { BIBLIOTECA, RUTINA_CLASICA } from './plantillas';
-import { diaSemana, diasEntre, fechaCorta, fechaLocal, fechaRelativa, num } from './util';
+import { diaSemana, diasEntre, fechaCorta, fechaLocal, fechaRelativa, num, sumarDias } from './util';
 
 /** Hora límite de cada bloque: pasada esa hora, lo pendiente se muestra como atrasado. */
 export const LIMITE_BLOQUE = { manana: 13, tarde: 20 } as const;
@@ -371,6 +371,27 @@ const decRes = (c: Campo, x: number) => (c.calculo !== 'valor' ? decimalesIndica
 const limite = (n: number) => String(Math.round(n * 100) / 100).replace('.', ',');
 const nombreDato = (nombreTarea: string, campos: Campo[], i: number) => (campos.filter((c) => !c.saldo).length > 1 ? campos[i].etiqueta : nombreTarea);
 
+/**
+ * Valor del mismo dato en un registro anterior. Si el supervisor cambió los campos de la tarea entre medio, se busca
+ * por su nombre y unidad, no por la posición: así nunca se resta una temperatura de una lectura de medidor.
+ */
+export function valorPar(prev: Registro | null | undefined, c: Campo, i: number): number | null {
+  if (!prev) return null;
+  const campos = prev.tarea?.campos;
+  if (!campos) return prev.valores[i] ?? null;
+  const igual = (x: Campo | undefined) => x && x.etiqueta === c.etiqueta && x.unidad === c.unidad && Boolean(x.acumulativo) === Boolean(c.acumulativo);
+  if (igual(campos[i])) return prev.valores[i] ?? null;
+  const k = campos.findIndex((x) => igual(x));
+  return k >= 0 ? (prev.valores[k] ?? null) : null;
+}
+
+/** El galpón está en recría: así marcado, o con un lote de menos de 18 semanas de vida. */
+function esRecria(config: Config, r: Registro): boolean {
+  const g = config.galpones.find((x) => x.id === r.galpon_id);
+  if (g?.tipo === 'recria') return true;
+  return Boolean(g?.nacimiento && diasEntre(g.nacimiento, r.fecha) < 17 * 7);
+}
+
 /** Los registros anteriores de la misma tarea en el mismo galpón, del más reciente al más antiguo (máximo `n`, hasta 10 días atrás). */
 export function historial(indice: Indice, r: Registro, n: number): Registro[] {
   const out: Registro[] = [];
@@ -397,9 +418,48 @@ export function baseDe(indice: Indice, r: Registro, i: number): number | null {
   if (!c || v == null || r.omitida) return null;
   if (!c.acumulativo) return v;
   const prev = indice.anterior(r.fecha, r.galpon_id, r.tarea_id ?? '');
-  const pv = prev?.valores[i];
+  const pv = valorPar(prev, c, i);
   if (!prev || pv == null || v < pv) return null;
   return (v - pv) / Math.max(1, diasEntre(prev.fecha, r.fecha));
+}
+
+/**
+ * Huevos y % de postura de un día sumando todas las tareas de recolección del galpón. `completo` = ya se anotaron
+ * todas las recolecciones que tocaban ese día (con una sola recolección, basta esa).
+ */
+export function posturaDelDia(config: Config, indice: Indice, fecha: string, galponId: string, actual?: Registro): { huevos: number; pct: number | null; completo: boolean } | null {
+  const tareas = config.tareas.filter((t) => t.activo && t.campos.some((_, i) => magnitud(t.campos, i) === 'postura'));
+  const registros = indice.delDia(fecha, galponId).filter((x) => !x.omitida && x.tarea_id !== actual?.tarea_id);
+  if (actual && !actual.omitida) registros.push(actual as RegistroLocal);
+  let huevos = 0;
+  let aves: number | null = null;
+  const hechas = new Set<string>();
+  for (const x of registros) {
+    const campos = x.tarea?.campos ?? [];
+    const i = campos.findIndex((_, k) => magnitud(campos, k) === 'postura');
+    if (i < 0 || x.valores[i] == null) continue;
+    huevos += x.valores[i]!;
+    hechas.add(x.tarea_id ?? '');
+    aves = aves ?? x.aves ?? null;
+  }
+  if (!hechas.size) return null;
+  const completo = tareas.length <= 1 || tareas.every((t) => hechas.has(t.id) || !t.dias?.includes?.(diaSemana(fecha)));
+  return { huevos, pct: aves ? (huevos * 100) / aves : null, completo };
+}
+
+/** Temperatura máxima anotada ese día en el galpón (incluido el registro que se está guardando). */
+function maximaDelDia(indice: Indice, fecha: string, galponId: string, actual?: Registro): number | null {
+  let max: number | null = null;
+  const lista = [...indice.delDia(fecha, galponId).filter((x) => x.id !== actual?.id && x.tarea_id !== actual?.tarea_id), ...(actual ? [actual] : [])];
+  for (const r of lista) {
+    if (r.omitida) continue;
+    const campos = r.tarea?.campos ?? [];
+    campos.forEach((c, i) => {
+      const v = r.valores[i];
+      if (v != null && magnitud(campos, i) === 'temperatura' && !/m[ií]n/i.test(c.etiqueta)) max = max == null ? v : Math.max(max, v);
+    });
+  }
+  return max;
 }
 
 /** Agua (L) y alimento (kg) del día en un galpón, si ya están los dos. */
@@ -439,7 +499,13 @@ export function avisosLogicos(p: { config: Config; indice: Indice; registro: Reg
     const ev = p.evs[i];
     const x = c.calculo !== 'valor' ? ev?.indicador : ev?.base;
     if (x == null) return;
-    const { min, max } = limitesDe(nombre, campos, i);
+    const { min, max, sugeridos } = limitesDe(nombre, campos, i);
+    const m = magnitud(campos, i);
+    // En un galpón chico una sola muerta ya pasa el 0,1 %: bajo 3 aves no se avisa por porcentaje.
+    if (m === 'mortalidad' && (p.evs[i]?.base ?? 0) < 3) return;
+    // Los límites sugeridos son de ponedora adulta: en recría (o antes de la semana 18) el agua y el alimento se comparan
+    // con la curva de la línea, no con esos números.
+    if (sugeridos && (m === 'agua' || m === 'alimento') && esRecria(p.config, r)) return;
     const texto = `${nombreDato(nombre, campos, i)}: ${num(x, decRes(c, x))} ${unidadResultado(c)}`;
     if (min != null && x < min) out.push(`${texto}, bajo el límite de ${limite(min)}`);
     else if (max != null && x > max) out.push(`${texto}, sobre el límite de ${limite(max)}`);
@@ -494,28 +560,29 @@ export function avisosLogicos(p: { config: Config; indice: Indice; registro: Reg
     }
   });
 
-  // Caída de la postura respecto del promedio de los días anteriores (señal temprana de enfermedad o de manejo).
-  campos.forEach((c, i) => {
-    if (magnitud(campos, i) !== 'postura') return;
-    const hoy = p.evs[i]?.indicador;
-    const antes = previos
-      .filter((x) => diasEntre(x.fecha, r.fecha) <= 4)
-      .slice(0, 3)
-      .map((x) => x.indicadores?.[i])
-      .filter((v): v is number => v != null);
-    if (hoy == null || antes.length < 2) return;
-    const prom = antes.reduce((a, b) => a + b, 0) / antes.length;
-    if (prom - hoy >= 3) out.push(`Postura ${num(hoy, 1)} %: bajó ${num(prom - hoy, 1)} puntos respecto del promedio de los días anteriores (${num(prom, 1)} %)`);
-  });
+  // Postura del día completo (puede haber varias recolecciones): se juzga una sola vez, cuando ya están todas.
+  const iPost = campos.findIndex((_, i) => magnitud(campos, i) === 'postura');
+  const dia = iPost >= 0 ? posturaDelDia(p.config, p.indice, r.fecha, r.galpon_id, r) : null;
+  if (dia?.completo && dia.pct != null) {
+    // Caída respecto del promedio de los días anteriores (señal temprana de enfermedad o de manejo).
+    const antes: number[] = [];
+    for (let k = 1; k <= 4 && antes.length < 3; k++) {
+      const x = posturaDelDia(p.config, p.indice, sumarDias(r.fecha, -k), r.galpon_id);
+      if (x?.completo && x.pct != null) antes.push(x.pct);
+    }
+    if (antes.length >= 2) {
+      const prom = antes.reduce((a, b) => a + b, 0) / antes.length;
+      if (prom - dia.pct >= 3) out.push(`Postura del día ${num(dia.pct, 1)} %: bajó ${num(prom - dia.pct, 1)} puntos respecto del promedio de los días anteriores (${num(prom, 1)} %)`);
+    }
+  }
 
   // Comparación con la curva de la línea genética del galpón.
-  const iPost = campos.findIndex((_, i) => magnitud(campos, i) === 'postura');
   const iAlim = campos.findIndex((_, i) => magnitud(campos, i) === 'alimento');
   out.push(
     ...avisosCurva({
       config: p.config,
       registro: r,
-      postura: iPost >= 0 ? (p.evs[iPost]?.indicador ?? null) : null,
+      postura: dia?.completo ? dia.pct : null,
       alimentoAve: iAlim >= 0 ? (p.evs[iAlim]?.indicador ?? null) : null,
     }),
   );
@@ -523,8 +590,16 @@ export function avisosLogicos(p: { config: Config; indice: Indice; registro: Reg
   // Relación entre el agua y el alimento del mismo día.
   if (campos.some((_, i) => ['agua', 'alimento'].includes(magnitud(campos, i) ?? ''))) {
     const aa = aguaYAlimento(p.indice, r.fecha, r.galpon_id, r);
-    if (aa && ((logica.ratioMin != null && aa.relacion < logica.ratioMin) || (logica.ratioMax != null && aa.relacion > logica.ratioMax))) {
-      out.push(`Relación agua/alimento: ${limite(aa.relacion)} L por kg, fuera de los límites (${logica.ratioMin != null ? limite(logica.ratioMin) : '0'} a ${logica.ratioMax != null ? limite(logica.ratioMax) : 'sin tope'})`);
+    // Con calor las aves toman bastante más agua por kilo de alimento (hasta 4 o 5 L sobre 30 °C): el tope sube.
+    const tmax = maximaDelDia(p.indice, r.fecha, r.galpon_id, r);
+    const extra = tmax != null && tmax >= 28 && logica.ratioMax != null ? Math.min(2, (tmax - 26) * 0.25) : 0;
+    const tope = logica.ratioMax != null ? logica.ratioMax + extra : null;
+    if (aa && ((logica.ratioMin != null && aa.relacion < logica.ratioMin) || (tope != null && aa.relacion > tope))) {
+      out.push(
+        `Relación agua/alimento: ${limite(aa.relacion)} L por kg (${num(aa.agua)} L de agua y ${num(aa.alimento)} kg de alimento), fuera de los límites ` +
+          `(${logica.ratioMin != null ? limite(logica.ratioMin) : '0'} a ${tope != null ? limite(tope) : 'sin tope'}${extra ? `, ampliado por la máxima de ${num(tmax!, 1)} °C` : ''}). ` +
+          `Si nada más cambió, revisa primero que las dos lecturas estén bien anotadas`,
+      );
     }
   }
   return out;
@@ -544,7 +619,7 @@ export function comoSeCalculo(indice: Indice, r: Registro, galpon: Galpon | unde
     let base: number | null = v;
     if (c.acumulativo) {
       const prev = indice.anterior(r.fecha, r.galpon_id, r.tarea_id ?? '');
-      const pv = prev?.valores[i];
+      const pv = valorPar(prev, c, i);
       if (!prev || pv == null) {
         out.push(`${etiqueta}es la primera lectura: el consumo se calcula desde la siguiente.`);
         return;

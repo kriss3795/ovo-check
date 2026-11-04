@@ -694,6 +694,18 @@ end $$;
 -- Inventario: saldo de cada artículo en cada lugar, a partir de los movimientos de los registros vigentes
 -- (no anulados ni reemplazados por una corrección). Un conteo físico deja el saldo en lo contado; se informa
 -- además cuánto difería de lo que decía el sistema justo antes. Solo el supervisor, para que nadie cuente "a ojo".
+-- Momento del registro original de una cadena de correcciones: una corrección ocupa el lugar del original en el tiempo
+-- (si se corrige el lunes un ingreso, el saldo lo cuenta el lunes, antes del conteo del martes).
+create or replace function oc__momento_original(rid uuid) returns timestamptz
+language sql stable security definer set search_path = public, pg_temp as $$
+  with recursive cadena(id, corrige, capturado, n) as (
+    select r.id, r.datos ->> 'corrige', r.capturado, 0 from oc_registros r where r.id = rid
+    union all
+    select o.id, o.datos ->> 'corrige', o.capturado, c.n + 1 from cadena c join oc_registros o on o.id::text = c.corrige where c.n < 50
+  )
+  select capturado from cadena order by n desc limit 1;
+$$;
+
 create or replace function oc_saldos(p jsonb) returns jsonb
 language plpgsql security definer set search_path = public, pg_temp as $$
 declare
@@ -703,12 +715,13 @@ begin
   d := oc__dispositivo(p ->> 'token');
   perform oc__supervisor(d, p ->> 'sesion');
   for m in
-    select x ->> 'b' as b, x ->> 'k' as k, (x ->> 'q')::numeric as q, coalesce((x ->> 'set')::boolean, false) as fija, r.capturado
+    select x ->> 'b' as b, x ->> 'k' as k, (x ->> 'q')::numeric as q, coalesce((x ->> 'set')::boolean, false) as fija,
+      case when coalesce(r.datos ->> 'corrige', '') <> '' then oc__momento_original(r.id) else r.capturado end as capturado
     from oc_registros r, jsonb_array_elements(r.datos -> 'mov') x
     where r.granja_id = d.granja_id and jsonb_typeof(r.datos -> 'mov') = 'array'
       and not coalesce((r.datos ->> 'anulado')::boolean, false)
       and not exists (select 1 from oc_registros c where c.granja_id = r.granja_id and c.datos ->> 'corrige' = r.id::text)
-    order by 1, 2, r.capturado, r.id
+    order by 1, 2, 5, r.id
   loop
     clave := m.b || '|' || m.k;
     if clave <> actual then
@@ -767,7 +780,8 @@ begin
     raise exception 'OC_DATOS';
   end if;
   if coalesce(u ->> 'pin_hash', '') = '' then
-    update oc_granjas set config = oc__cambiar_usuario(config, u ->> 'id', jsonb_build_object('pin_hash', p ->> 'pin_hash')),
+    -- Al crear su PIN la persona ya vio qué datos se guardan (Ley 21.719): queda anotado cuándo.
+    update oc_granjas set config = oc__cambiar_usuario(config, u ->> 'id', jsonb_build_object('pin_hash', p ->> 'pin_hash', 'informado', now())),
       version = version + 1 where id = g.id returning * into g;
     return jsonb_build_object('version', g.version, 'config', oc__config_para(g, false));
   end if;
@@ -1048,6 +1062,18 @@ begin
       elsif abs((r ->> 'fecha')::date - dia) > 1 then
         r := r || jsonb_build_object('fecha', dia::text);
       end if;
+    end if;
+    -- Una corrección siempre es del mismo día, galpón y tarea que el original, y solo de su versión vigente
+    -- (no de una ya corregida o anulada): así nadie rellena días con correcciones ni revive algo anulado.
+    if coalesce(r ->> 'corrige', '') <> '' then
+      select * into orig from oc_registros where id::text = r ->> 'corrige' and granja_id = d.granja_id;
+      if not found or coalesce((orig.datos ->> 'anulado')::boolean, false)
+         or exists (select 1 from oc_registros x where x.granja_id = d.granja_id and x.datos ->> 'corrige' = orig.id::text and x.id::text <> r ->> 'id') then
+        rechazados := rechazados || jsonb_build_object('id', r ->> 'id', 'motivo', 'version');
+        continue;
+      end if;
+      r := r || jsonb_build_object('fecha', orig.fecha::text, 'galpon_id', orig.galpon_id,
+                                   'tarea_id', orig.datos -> 'tarea_id', 'tipo', orig.datos -> 'tipo');
     end if;
     r := r || jsonb_build_object('usuario_nombre', case
       when u is not null then u ->> 'nombre'
@@ -1781,6 +1807,36 @@ begin
   return jsonb_build_object('token', d.token, 'dispositivo_id', d.id, 'sesion', s, 'usuario_id', u ->> 'id',
     'version', g.version, 'config', oc__config_para(g, true), 'clave_operarios', g.clave_operarios,
     'temporal', coalesce((u ->> 'temporal')::boolean, false));
+end $$;
+
+-- Ley 21.719 (derecho de supresión): borra los datos personales de una persona que ya no trabaja en el plantel.
+-- Los registros productivos se conservan (trazabilidad sanitaria), pero sin su nombre ni la ubicación del teléfono.
+-- Las fotos llevan el nombre impreso: se borran las suyas. {token, sesion, usuario_id}
+create or replace function oc_anonimizar(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare d oc_dispositivos; g oc_granjas; s text; u jsonb; n integer; etiqueta text;
+begin
+  d := oc__dispositivo(p ->> 'token');
+  s := oc__supervisor(d, p ->> 'sesion');
+  select * into g from oc_granjas where id = d.granja_id for update;
+  select x into u from jsonb_array_elements(g.config -> 'usuarios') x where x ->> 'id' = p ->> 'usuario_id';
+  if u is null or u ->> 'id' = s then
+    raise exception 'OC_DATOS';
+  end if;
+  etiqueta := 'Persona eliminada ' || upper(left(md5(u ->> 'id'), 4));
+  update oc_granjas set config = oc__cambiar_usuario(config, u ->> 'id', jsonb_build_object(
+      'nombre', etiqueta, 'correo', '', 'pin_hash', '', 'activo', false, 'estado', 'baja', 'anonimizado', now())),
+    version = version + 1 where id = g.id;
+  update oc_registros set datos = datos || jsonb_build_object('usuario_nombre', etiqueta, 'lat', null, 'lng', null, 'precision', null)
+    where granja_id = g.id and datos ->> 'usuario_id' = u ->> 'id';
+  get diagnostics n = row_count;
+  delete from oc_fotos f where f.granja_id = g.id and exists (
+    select 1 from oc_registros r, jsonb_array_elements(coalesce(r.datos -> 'fotos', '[]'::jsonb)) x
+    where r.granja_id = g.id and r.datos ->> 'usuario_id' = u ->> 'id' and f.nombre = g.id || '/' || (x ->> 'id') || '.jpg');
+  update oc_dispositivos set usuario_id = null where granja_id = g.id and usuario_id = u ->> 'id';
+  delete from oc_suscripciones where usuario_id = u ->> 'id';
+  perform oc__bitacora(g.id, s, 'Datos personales eliminados', jsonb_build_array(etiqueta, n || ' registros'));
+  return jsonb_build_object('ok', true, 'registros', n, 'nombre', etiqueta);
 end $$;
 
 select 'Ovo Check instalado' as resultado;

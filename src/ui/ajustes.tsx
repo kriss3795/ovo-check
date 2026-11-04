@@ -3,7 +3,7 @@ import {
   ArrowDown, ArrowUp, Bell, Check, ChevronRight, ClipboardList, Database, Images, KeyRound, LogOut, MapPin, Plus,
   Printer, QrCode, RefreshCw, RotateCcw, ScanLine, Send, Settings2, Smartphone, Monitor, Trash2, TriangleAlert, Users, Warehouse, Wifi, X,
 } from 'lucide-react';
-import { administrar, ahora, diagnostico, guardarConfig, invitacionQR, salir } from '../lib/app';
+import { administrar, ahora, anonimizarPersona, diagnostico, guardarConfig, invitacionQR, salir } from '../lib/app';
 import { createPortal } from 'react-dom';
 import { CodigoQR, EscanerQR, codigoLegible, enlaceUnirse, leerQR } from './qr';
 import { LINEAS, edadSemanas, semanaTexto } from '../lib/estandar';
@@ -12,11 +12,12 @@ import { anotarPausa, cargaDiaria, limitesDe, limitesSugeridos, LOGICA_DEFECTO, 
 import { mensajeError } from '../lib/nube';
 import { BIBLIOTECA, GRUPOS_TAREAS, RUTINA_CLASICA, campoAvesVivas, campoVacio, tareaDesde, tareaVacia } from '../lib/plantillas';
 import type { Campo, Config, Galpon, Tarea, Usuario } from '../lib/tipos';
-import { DIAS_CORTOS, claveDebil, fechaLarga, fechaLocal, fechaRelativa, haceCuanto, hashPin, iniciales, nombreDia, num, uid } from '../lib/util';
+import { DIAS_CORTOS, leerNumero, claveDebil, fechaLarga, fechaLocal, fechaRelativa, haceCuanto, hashPin, iniciales, nombreDia, num, uid } from '../lib/util';
 import { Barra, Confirmar, Hoja, ICONOS, IconoTarea, Interruptor, aNumero } from './base';
 import { CambiarClave, correoValido } from './inicio';
 import { BotonInstalar, PaginaAvisos } from './avisos';
 import { HojaExportar, HojaFotos, marcarPaso } from './supervisor';
+import { armarCsv, entregarArchivo } from '../lib/exportar';
 import { Falta } from './operario';
 
 /** Guarda un cambio de configuración en el servidor y avisa el resultado. */
@@ -983,8 +984,46 @@ function HojaPersona({ u, esYo, cerrar }: { u: Usuario; esYo: boolean; cerrar: (
   const [nombre, setNombre] = useState(u.nombre);
   const [correo, setCorreo] = useState(u.correo ?? '');
   const [clave, setClave] = useState('');
-  const [modo, setModo] = useState<'ver' | 'clave' | 'borrar' | 'pin'>('ver');
+  const [modo, setModo] = useState<'ver' | 'clave' | 'borrar' | 'pin' | 'suprimir'>('ver');
   const { ocupado, guardar } = useGuardar();
+  const config = useEstado((e) => e.config)!;
+  const registros = useEstado((e) => e.registros);
+  const revisiones = useEstado((e) => e.revisiones);
+  const [suprimiendo, setSuprimiendo] = useState(false);
+  // Ley 21.719: acceso y portabilidad (sus datos en un archivo) y supresión (borrar su nombre y ubicación).
+  const descargarSus = async () => {
+    const suyos = registros.filter((r) => r.usuario_id === u.id);
+    try {
+      await entregarArchivo(`datos-${u.nombre.replace(/[^\p{L}\d]+/gu, '-').toLowerCase()}.csv`, armarCsv(config, suyos, revisiones));
+    } catch (e) {
+      avisar(mensajeError(e), 'mal');
+    }
+  };
+  const suprimir = async () => {
+    setSuprimiendo(true);
+    try {
+      const r = await anonimizarPersona(u.id);
+      avisar(`Listo: se borraron el nombre y la ubicación de ${r.registros} registros`, 'ok');
+      cerrar();
+    } catch (e) {
+      avisar(mensajeError(e), 'mal');
+    } finally {
+      setSuprimiendo(false);
+    }
+  };
+  if (modo === 'suprimir') {
+    return (
+      <Confirmar
+        titulo={`¿Borrar los datos personales de ${u.nombre}?`}
+        texto="Se hace cuando la persona lo pide y ya no trabaja aquí (derecho de supresión, Ley 21.719). Sus registros de producción se conservan para la trazabilidad, pero quedan sin su nombre ni la ubicación del teléfono, y se borran sus fotos. No se puede deshacer. Antes puedes descargar sus datos para entregárselos."
+        accion="Borrar sus datos personales"
+        peligro
+        ocupado={suprimiendo}
+        cerrar={() => setModo('ver')}
+        alConfirmar={suprimir}
+      />
+    );
+  }
   const cambiar = (cambio: (x: Usuario) => void, listo: string) =>
     guardar((c) => {
       const x = c.usuarios.find((y) => y.id === u.id);
@@ -1102,21 +1141,35 @@ function HojaPersona({ u, esYo, cerrar }: { u: Usuario; esYo: boolean; cerrar: (
       {esYo ? (
         <p className="chico suave">Tu clave se cambia en Ajustes, Cambiar mi clave. Tu propio estado solo lo puede cambiar otro supervisor.</p>
       ) : (
-        <button className="boton peligro-suave" onClick={() => setModo('borrar')}>
-          <Trash2 size={20} aria-hidden /> Eliminar persona
-        </button>
+        <>
+          <button className="boton peligro-suave" onClick={() => setModo('borrar')}>
+            <Trash2 size={20} aria-hidden /> Eliminar persona
+          </button>
+          <details className="plegable">
+            <summary>Sus datos personales</summary>
+            <div className="pila" style={{ marginTop: 10 }}>
+              <p className="chico suave">
+                {u.informado ? `Se le informó qué datos se guardan el ${fechaLarga(u.informado.slice(0, 10)).toLowerCase()}, al crear su PIN. ` : ''}
+                Si te pide ver sus datos o llevárselos, descárgalos y entrégaselos. Si te pide eliminarlos, primero dalo de baja.
+              </p>
+              <button className="boton" onClick={descargarSus}>
+                <Database size={20} aria-hidden /> Descargar sus registros
+              </button>
+              {u.estado === 'baja' && (
+                <button className="boton peligro-suave" onClick={() => setModo('suprimir')}>
+                  Borrar sus datos personales
+                </button>
+              )}
+            </div>
+          </details>
+        </>
       )}
     </Hoja>
   );
 }
 
 // ------------------------------------------------------------------ alertas de mediciones
-const aLimite = (t: string): number | null => {
-  const x = t.trim().replace(',', '.');
-  if (x === '') return null;
-  const n = Number(x);
-  return Number.isFinite(n) ? n : null;
-};
+const aLimite = (t: string): number | null => leerNumero(t);
 const deLimite = (n: number | null) => (n === null ? '' : String(n).replace('.', ','));
 
 function AlertasLogicas() {

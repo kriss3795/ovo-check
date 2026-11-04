@@ -4,17 +4,29 @@ import { urlFoto } from './nube';
 import type { Config, RegistroLocal, Revision } from './tipos';
 import { fechaHora } from './util';
 
+/** Número con sus decimales: en el CSV se escribe con coma; en Excel queda como número de verdad. */
+export interface Num {
+  n: number;
+  d: number;
+}
+export const esNum = (v: unknown): v is Num => typeof v === 'object' && v !== null && 'n' in v && 'd' in v;
+
 const celda = (v: unknown) => {
+  if (esNum(v)) return v.n.toFixed(v.d).replace('.', ',');
   let s = v === null || v === undefined ? '' : String(v);
   // Un texto que empieza con = + - o @ se ejecutaría como fórmula al abrir el archivo en Excel: se le antepone un
   // apóstrofo para que quede como texto. Los números (incluidos los negativos) no se tocan.
   if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(,\d+)?$/.test(s)) s = `'${s}`;
   return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
-const decimal = (v: number | null | undefined, d: number) =>
-  v === null || v === undefined ? '' : v.toFixed(d).replace('.', ',');
+const decimal = (v: number | null | undefined, d: number): Num | '' => (v === null || v === undefined ? '' : { n: v, d });
 
 export function armarCsv(config: Config, registros: RegistroLocal[], revisiones: Revision[]): string {
+  return '\ufeff' + filasRegistros(config, registros, revisiones).map((f) => f.map(celda).join(';')).join('\r\n');
+}
+
+/** Una fila por dato anotado (con su encabezado). La usan el CSV y el Excel. */
+export function filasRegistros(config: Config, registros: RegistroLocal[], revisiones: Revision[]): unknown[][] {
   const galpon = new Map(config.galpones.map((g) => [g.id, g]));
   const persona = new Map(config.usuarios.map((u) => [u.id, u.nombre]));
   const rev = new Map(revisiones.map((v) => [v.registro_id, v]));
@@ -30,7 +42,7 @@ export function armarCsv(config: Config, registros: RegistroLocal[], revisiones:
   for (const r of registros) {
     const g = galpon.get(r.galpon_id);
     const v = rev.get(r.id);
-    const comunes = (dato: string, valor: string, unidad: string, ind: string, vind: string) => [
+    const comunes = (dato: string, valor: Num | string, unidad: string, ind: string, vind: Num | string) => [
       r.fecha,
       fechaHora(r.capturado ?? r.capturado_dispositivo).slice(11),
       g?.nombre ?? r.galpon_nombre ?? '',
@@ -76,13 +88,13 @@ export function armarCsv(config: Config, registros: RegistroLocal[], revisiones:
       filas.push(comunes(r.categoria ?? '', '', '', '', ''));
     }
   }
-  return '﻿' + filas.map((f) => f.map(celda).join(';')).join('\r\n');
+  return filas;
 }
 
 /** Entrega el archivo: en el computador se descarga; en el teléfono se abre el menú para guardarlo o enviarlo. */
-export async function entregarArchivo(nombre: string, contenido: string): Promise<'descargado' | 'compartido'> {
-  const blob = new Blob([contenido], { type: 'text/csv;charset=utf-8' });
-  const archivo = new File([blob], nombre, { type: 'text/csv' });
+export async function entregarArchivo(nombre: string, contenido: string | Blob): Promise<'descargado' | 'compartido'> {
+  const blob = typeof contenido === 'string' ? new Blob([contenido], { type: 'text/csv;charset=utf-8' }) : contenido;
+  const archivo = new File([blob], nombre, { type: blob.type || 'application/octet-stream' });
   const esMovil = matchMedia('(pointer: coarse)').matches;
   if (esMovil && navigator.canShare?.({ files: [archivo] })) {
     try {

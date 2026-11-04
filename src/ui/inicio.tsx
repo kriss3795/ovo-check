@@ -904,6 +904,15 @@ function CrearPin({ usuario, volver }: { usuario: Usuario; volver: () => void })
           <p className="suave" style={{ marginTop: 6 }}>
             {primero ? 'Escríbelo otra vez para confirmar.' : 'Cuatro números que solo tú conozcas. Con él firmas tus registros.'}
           </p>
+          {!primero && (
+            <p className="chico suave aviso-datos">
+              Ovo Check guarda tu nombre, lo que registras, la hora, la ubicación del teléfono al registrar y las fotos que tomas, para el control de
+              la producción del plantel. Puedes pedirle a tu supervisor verlos, corregirlos o eliminarlos.{' '}
+              <a href="/privacidad.html" target="_blank" rel="noopener">
+                Cómo se cuidan tus datos
+              </a>
+            </p>
+          )}
           <div key={mal}>
             <PuntosPin largo={pin.length} mal={mal > 0 && !pin && Boolean(msg)} />
           </div>

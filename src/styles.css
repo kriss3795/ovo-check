@@ -1796,3 +1796,181 @@ table.datos td.falta {
     font-weight: 700;
   }
 }
+
+/* ------------------------------------------------------------ producción */
+.produccion {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.prod-cabeza {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.prod-filtros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+.prod-filtros .segmentos {
+  flex: 1 1 300px;
+}
+.campo-linea {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 180px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gris);
+}
+.prod-graficos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+.grafico {
+  margin: 0;
+  padding: 14px 14px 8px;
+  background: var(--blanco);
+  border: 1px solid var(--linea);
+  border-radius: var(--radio);
+}
+.grafico figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 15px;
+}
+.grafico-leyenda {
+  margin-left: auto;
+  display: flex;
+  gap: 14px;
+  font-size: 13px;
+  color: var(--gris);
+}
+.ley-real::before,
+.ley-guia::before {
+  content: '';
+  display: inline-block;
+  width: 18px;
+  height: 0;
+  margin-right: 6px;
+  vertical-align: middle;
+  border-top: 2.5px solid var(--verde);
+}
+.ley-guia::before {
+  border-top: 2px dashed var(--gris-claro);
+}
+.grafico-lienzo {
+  position: relative;
+}
+.grafico svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  touch-action: pan-y;
+}
+.g-rejilla {
+  stroke: var(--linea-suave);
+  stroke-width: 1;
+}
+.g-eje {
+  font-size: 11.5px;
+  fill: var(--gris);
+  font-variant-numeric: tabular-nums;
+}
+.g-real {
+  fill: none;
+  stroke: var(--verde);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.g-guia {
+  fill: none;
+  stroke: var(--gris-claro);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+}
+.g-punto {
+  fill: var(--verde);
+  stroke: var(--blanco);
+  stroke-width: 2;
+}
+.g-guia-vertical {
+  stroke: var(--gris-claro);
+  stroke-width: 1;
+}
+.grafico-tip {
+  position: absolute;
+  top: 4px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  font-size: 13px;
+  white-space: nowrap;
+  background: var(--tinta);
+  color: #fff;
+  border-radius: 8px;
+  pointer-events: none;
+}
+.tabla-sub {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--gris);
+}
+.fila-clic {
+  cursor: pointer;
+}
+.fila-clic:hover th,
+.fila-clic:hover td {
+  background: var(--verde-suave);
+}
+.aviso-datos {
+  margin-top: 14px;
+  text-align: left;
+}
+@media (min-width: 900px) {
+  .sup-cuerpo {
+    max-width: 1280px;
+    padding: 24px 32px 48px;
+  }
+}
+.fila-motivo {
+  display: block;
+  margin-top: 4px;
+  font-size: 14.5px;
+  line-height: 1.35;
+  color: var(--mal);
+}
+.hojas-excel {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: 10px;
+}
+.hojas-excel legend {
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.casilla {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+.casilla input {
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  accent-color: var(--verde);
+  flex: none;
+}
