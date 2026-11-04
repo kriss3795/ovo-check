@@ -2378,3 +2378,26 @@ table.datos td.falta {
 .hoja-calculo tbody tr:hover td:first-child {
   background: var(--verde-suave);
 }
+.pie-doble {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 10px;
+}
+.muestra-lista {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.muestra-numeros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.muestra-numeros span {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--verde-suave);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}

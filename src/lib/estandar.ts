@@ -133,3 +133,13 @@ export function avisosCurva(p: {
   });
   return out;
 }
+
+/** Estadística de una muestra de pesos: promedio, CV y uniformidad (% de aves dentro de ±10 % del promedio). */
+export function estadisticaMuestra(xs: number[]): { n: number; promedio: number; cv: number; uniformidad: number; min: number; max: number } | null {
+  const v = xs.filter((x) => Number.isFinite(x) && x > 0);
+  if (!v.length) return null;
+  const promedio = v.reduce((a, b) => a + b, 0) / v.length;
+  const de = Math.sqrt(v.reduce((a, b) => a + (b - promedio) ** 2, 0) / Math.max(1, v.length - 1));
+  const dentro = v.filter((x) => Math.abs(x - promedio) <= promedio * 0.1).length;
+  return { n: v.length, promedio, cv: (de / promedio) * 100, uniformidad: (dentro * 100) / v.length, min: Math.min(...v), max: Math.max(...v) };
+}

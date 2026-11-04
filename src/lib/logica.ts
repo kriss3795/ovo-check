@@ -1,5 +1,5 @@
 // Reglas del día a día: qué tareas tocan, qué está hecho y qué se marca para el supervisor.
-import { avisosCurva } from './estandar';
+import { avisosCurva, estadisticaMuestra } from './estandar';
 import type { Campo, Config, Flag, Galpon, Logica, Pausa, Registro, RegistroLocal, Revision, Tarea } from './tipos';
 import { tareaParaGalpon } from './modulos';
 import { BIBLIOTECA, RUTINA_CLASICA } from './plantillas';
@@ -574,6 +574,13 @@ export function avisosLogicos(p: { config: Config; indice: Indice; registro: Reg
       const prom = antes.reduce((a, b) => a + b, 0) / antes.length;
       if (prom - dia.pct >= 3) out.push(`Postura del día ${num(dia.pct, 1)} %: bajó ${num(prom - dia.pct, 1)} puntos respecto del promedio de los días anteriores (${num(prom, 1)} %)`);
     }
+  }
+
+  // Pesaje por muestra: uniformidad bajo 80 % (la meta de las guías genéticas es 80 a 85 % o más).
+  const pesos = (r.detalle as any)?.muestra as number[] | undefined;
+  const est = pesos && pesos.length >= 10 ? estadisticaMuestra(pesos) : null;
+  if (est && est.uniformidad < 80) {
+    out.push(`Uniformidad ${num(est.uniformidad)} % (${est.n} aves, CV ${num(est.cv, 1)} %): bajo la meta de 80 %`);
   }
 
   // Comparación con la curva de la línea genética del galpón.

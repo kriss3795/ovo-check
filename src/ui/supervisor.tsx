@@ -4,7 +4,7 @@ import {
   Ban, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Download, History, House, MapPin, Pencil,
   Settings, ShieldAlert, Smartphone, TriangleAlert, CircleX, Images,
 } from 'lucide-react';
-import { administrar, ahora, asegurarPeriodo, guardarConfig, revisar, traerPeriodo } from '../lib/app';
+import { administrar, ahora, asegurarPeriodo, guardarConfig, haySesionSupervisor, revisar, traerPeriodo } from '../lib/app';
 import { avisar, cambiarRuta, ir, irRaiz, useEstado } from '../lib/estado';
 import { armarCsv, entregarArchivo } from '../lib/exportar';
 import { HOJAS, armarExcel, type Hoja as HojaExcel } from '../lib/excel';
@@ -14,7 +14,7 @@ import {
   evaluarCampo, flagsDe, indicadoresTexto, momento, relojMalo, resumen, tareasDe, vigenteEn,
 } from '../lib/logica';
 import { mensajeError } from '../lib/nube';
-import { CATEGORIAS_PROBLEMA } from '../lib/plantillas';
+import { CATEGORIAS_PROBLEMA, RUTINA_CLASICA } from '../lib/plantillas';
 import type { Config, Galpon, RegistroLocal, Tarea } from '../lib/tipos';
 import { distancia, duracion, fechaCorta, fechaHora, fechaLarga, fechaRelativa, haceCuanto, hora, mayuscula, num, sumarDias } from '../lib/util';
 import { AvisoServidor, AvisoSinEnviar, Barra, Envio, Foto, Hoja, Huevo, IconoTarea, Vacio, VisorFoto } from './base';
@@ -24,6 +24,7 @@ import { Gestion } from './gestion';
 import { Planilla } from './planilla';
 import { FranjaDemo } from './demo';
 import { ES_GESTION, resumenGestion, tituloGestion } from '../lib/modulos';
+import { estadisticaMuestra } from '../lib/estandar';
 import { TarjetaAvisos } from './avisos';
 import { EtiquetaEstado, Falta, useIndice } from './operario';
 
@@ -88,6 +89,19 @@ export function Navegacion({ tab, raiz = false }: { tab: string; raiz?: boolean 
 
 export function Supervisor({ tab }: { tab: string }) {
   const config = useEstado((e) => e.config)!;
+  // El pesaje semanal de la primera versión era solo fotos: pasa a anotar el peso de cada ave (la app saca promedio,
+  // CV y uniformidad). Se hace una vez, con la sesión del supervisor.
+  useEffect(() => {
+    const viejo = config.tareas.find((t) => t.nombre === 'Pesaje de aves' && t.tipo === 'fotos' && !t.campos.length);
+    if (!viejo || !haySesionSupervisor()) return;
+    const nuevo = RUTINA_CLASICA.find((b) => b.nombre === 'Pesaje de aves');
+    if (!nuevo) return;
+    guardarConfig((c) => {
+      const t = c.tareas.find((x) => x.id === viejo.id);
+      if (t) Object.assign(t, { tipo: nuevo.tipo, campos: nuevo.campos, foto: nuevo.foto, fotoEtiquetas: nuevo.fotoEtiquetas, ayuda: nuevo.ayuda });
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const usuario = useEstado((e) => e.usuario)!;
   const { criticos } = usePendientes();
   return (
@@ -1013,7 +1027,7 @@ export function HojaExportar({ cerrar }: { cerrar: () => void }) {
     { id: 'todo', nombre: 'Todo', desde: '2020-01-01' },
   ];
   const [pid, setPid] = useState('30');
-  const [hojas, setHojas] = useState<HojaExcel[]>(['diario', 'semanal', 'alertas', 'registros']);
+  const [hojas, setHojas] = useState<HojaExcel[]>(() => HOJAS.map((h) => h.id));
   const p = periodos.find((x) => x.id === pid)!;
   const descargar = async (formato: 'xlsx' | 'csv') => {
     setOcupado(formato);
@@ -1478,6 +1492,22 @@ export function RegistroDetalle({ id }: { id: string }) {
           )
         )}
 
+        {esSup && (reg.detalle as any)?.muestra?.length > 0 && (() => {
+          const est = estadisticaMuestra((reg.detalle as any).muestra);
+          if (!est) return null;
+          return (
+            <section className="tarjeta">
+              <p className="subtitulo">Muestra pesada</p>
+              <div className="kpis" style={{ marginTop: 10 }}>
+                <div className="kpi"><span className="kpi-titulo">Aves</span><span className="kpi-valor">{est.n}</span></div>
+                <div className="kpi"><span className="kpi-titulo">Promedio</span><span className="kpi-valor">{num(est.promedio)} g</span></div>
+                <div className={`kpi ${est.uniformidad < 80 ? 'mal' : ''}`}><span className="kpi-titulo">Uniformidad</span><span className="kpi-valor">{num(est.uniformidad)} %</span><span className="kpi-detalle">dentro de ±10 % del promedio</span></div>
+                <div className="kpi"><span className="kpi-titulo">CV</span><span className="kpi-valor">{num(est.cv, 1)} %</span></div>
+                <div className="kpi"><span className="kpi-titulo">Rango</span><span className="kpi-valor">{num(est.min)}–{num(est.max)}</span></div>
+              </div>
+            </section>
+          );
+        })()}
         {ES_GESTION(reg) && !reg.anulado && (esSup || (reg.fecha === hoy && reg.usuario_id === usuario.id)) && (
           <div className="pila">
             <button className="boton" onClick={() => ir({ p: 'form', tipo: reg.tipo, sub: (reg.detalle as any)?.sub, corrige: reg.id })}>
