@@ -7,8 +7,7 @@ import { ahora, guardarRegistro, registroGestion, type FotoNueva } from '../lib/
 import { avisar, cerrarPantalla, ir, useEstado } from '../lib/estado';
 import {
   AREAS_INFO, BODEGA_INSUMOS, POZO_MERMA, activos, areasDe, bodegasDe, calibresDe, enEnvases, envasesDe, lotesDe, mermasDe, nombreBodega,
-  semanaDeEdad, sumaHuevos, tituloGestion, resumenGestion,
-} from '../lib/modulos';
+  semanaDeEdad, sumaHuevos, tituloGestion, resumenGestion, lotesEfectivos, loteIdDe } from '../lib/modulos';
 import type { Area, Config, Envases, ItemHuevos, Mov, Registro, RegistroLocal } from '../lib/tipos';
 import { fechaHora, fechaLocal, hora, num, sumarDias, uid } from '../lib/util';
 import { leerNumero } from '../lib/util';
@@ -679,7 +678,7 @@ const VIAS = ['Agua de bebida', 'Spray', 'Ocular', 'Nasal', 'Inyectable', 'Punci
 /** Vacunas del plan sanitario que tocan o están atrasadas para los lotes activos, sin registro de aplicación. */
 export function vacunasPendientes(config: Config, gestion: RegistroLocal[], hoy: string, diasAntes = 7) {
   const out: { plan_id: string; producto: string; via: string; lote_id: string; lote: string; galpon_id: string | null; fecha: string; atrasada: boolean }[] = [];
-  for (const l of lotesDe(config)) {
+  for (const l of lotesEfectivos(config)) {
     if (l.estado !== 'activo' || !l.nacimiento) continue;
     for (const pl of config.plan_sanitario ?? []) {
       if (pl.etapa && pl.etapa !== l.etapa) continue;
@@ -724,7 +723,7 @@ function FormSanidad({ sub, original }: { sub: string; original?: RegistroLocal 
     setPlanId(p.plan_id);
     setProducto(p.producto);
     setVia(VIAS.includes(p.via) ? p.via : 'Otra');
-    const delLote = galponesTodos.filter((g) => g.lote_id === p.lote_id).map((g) => g.id);
+    const delLote = galponesTodos.filter((g) => loteIdDe(g) === p.lote_id).map((g) => g.id);
     if (delLote.length) setGalpones(delLote);
   };
   const listo = galpones.length > 0 && (sub === 'visita' ? hallazgos.trim().length >= 3 : producto.trim().length >= 2) && (sub !== 'tratamiento' || hasta >= desde);
@@ -741,7 +740,7 @@ function FormSanidad({ sub, original }: { sub: string; original?: RegistroLocal 
         producto: producto.trim(),
         galpones,
         galpones_nombres: elegidos.map((g) => g.nombre).join(', '),
-        lote_ids: [...new Set(elegidos.map((g) => g.lote_id).filter(Boolean))],
+        lote_ids: [...new Set(elegidos.map((g) => loteIdDe(g)))],
         ...(sub !== 'visita' ? { via, dosis: dosis.trim(), lote_producto: loteProd.trim(), plan_id: planId || null } : {}),
         ...(insumo && usado ? { insumo_id: insumo.id, insumo_nombre: insumo.nombre, cantidad_insumo: usado, unidad: insumo.unidad } : {}),
         ...(sub === 'tratamiento' ? { desde, hasta, resguardo_dias: resguardo ?? 0, diagnostico: diagnostico.trim() } : {}),

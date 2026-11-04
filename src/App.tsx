@@ -7,6 +7,7 @@ import { Aviso, Confirmar } from './ui/base';
 import { Bienvenida, CambiarClave, Desvinculado, Ingreso, SinNube } from './ui/inicio';
 import { Falta, FlujoTarea, OpGalpon, OpInicio, Problema } from './ui/operario';
 import { GalponDia, PersonaDia, RegistroDetalle, Supervisor } from './ui/supervisor';
+import { AreaInicio, FormGestion } from './ui/areas';
 
 function Pantalla() {
   const fase = useEstado((e) => e.fase);
@@ -51,6 +52,10 @@ function Pantalla() {
       return <GalponDia key={k} id={ruta.id} fecha={ruta.fecha} />;
     case 'personadia':
       return <PersonaDia key={k} id={ruta.id} />;
+    case 'form':
+      return <FormGestion key={k} tipo={ruta.tipo} sub={ruta.sub} corrige={ruta.corrige} anular={ruta.anular} />;
+    case 'area':
+      return <AreaInicio key={k} area={ruta.area} />;
     case 'ajuste':
       return <AjustePantalla key={`${k}-${ruta.cual}-${ruta.id ?? ''}`} cual={ruta.cual} id={ruta.id} />;
     default:

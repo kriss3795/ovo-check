@@ -1,4 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { MosaicoAreas } from './areas';
+import { areasDe } from '../lib/modulos';
 import {
   Camera, Check, ChevronRight, CircleCheck, Clock, LogOut, Minus, Plus, TriangleAlert, Ban, Keyboard, MapPinOff,
 } from 'lucide-react';
@@ -92,7 +94,8 @@ export function OpInicio({ embebido }: { embebido?: boolean }) {
         {!embebido && <AvisoServidor />}
         {!embebido && <AvisoSinEnviar />}
         {!embebido && <TarjetaAvisos />}
-        {!embebido && galpones.length > 1 && <p className="suave">Toca el galpón donde estás. Puedes cambiar de galpón cuando quieras.</p>}
+        {!embebido && usuario.rol === 'operario' && <MosaicoAreas areas={areasDe(config, usuario)} />}
+        {!embebido && usuario.rol === 'operario' && !areasDe(config, usuario).includes('galpones') ? null : !embebido && galpones.length > 1 && <p className="suave">Toca el galpón donde estás. Puedes cambiar de galpón cuando quieras.</p>}
         {galpones.length === 0 && <div className="tarjeta suave">No hay galpones en producción. El supervisor los activa en Ajustes.</div>}
         <div className="pila">
           {galpones.map((g, k) => {

@@ -136,6 +136,16 @@ Las curvas salen de las guías de cada empresa genética (punto medio de sus ran
 
 ---
 
+## Gestión, módulos e informe diario
+
+En **Ajustes > Módulos, listas e informe** se eligen los módulos del plantel (con perfiles listos: postura comercial completa, reproductoras o solo galpones): sala de proceso, bodega de huevos, despachos, recuperación, insumos y sanidad. Ahí mismo se editan las listas: bodegas, clientes, proveedores, insumos (con su stock mínimo) y el plan sanitario (vacunas por semana de vida).
+
+- **Pestaña Gestión:** botones para registrar en cada área, el inventario de huevos por calibre y bodega (en cajas y bandejas), el stock de insumos contra su mínimo, las vacunas del plan que tocan esta semana o están atrasadas, y lo registrado en los últimos 14 días. Cada registro se puede corregir o anular, con su historia.
+- **Áreas por persona:** en Ajustes > Personas > la persona > *Qué registra*. En su teléfono ve solo esas áreas, con formularios simples y sin saldos.
+- **Informe diario por correo:** cada noche llega a los supervisores (y a los correos extra que se anoten, como gerencia) una tabla por galpón con aves, huevos, postura, mortalidad, agua, alimento y alertas del día.
+
+---
+
 ## Lote nuevo en un galpón
 
 Cuando sale un lote y entra otro no hay que eliminar el galpón ni crearlo de nuevo. En Ajustes > Galpones > el galpón > **Empezar un lote nuevo** se anota el nombre del lote y las aves alojadas, y desde ese día el galpón parte de cero: las aves, el lote y las comparaciones con el día anterior (lectura del medidor, aves vivas, cambios de consumo). Se puede dejar en descanso (vacío sanitario) hasta que lleguen las aves.
