@@ -76,6 +76,8 @@ export interface Estado {
   rolIngreso: 'operario' | 'supervisor' | null;
   /** Plantel que la pantalla de entrada trae ya escrito (el de este teléfono, si fue desvinculado). */
   plantelSugerido: string | null;
+  /** Pantalla de entrada con que abrir la bienvenida (al volver a entrar un teléfono desvinculado). */
+  entradaSugerida: 'operario' | 'supervisor' | 'escanear' | null;
   /** Código del QR del plantel con que se abrió la app (…/?unir=CODIGO). */
   qrUnir: string | null;
   /** Código del QR de otro equipo que este supervisor va a aprobar (…/?aprobar=CODIGO o escaneado). */
@@ -132,6 +134,7 @@ let estado: Estado = {
   desvinculado: false,
   rolIngreso: null,
   plantelSugerido: null,
+  entradaSugerida: null,
   ...qrDeLaDireccion(),
   sync: { enLinea: navigator.onLine, ocupado: false, pendientes: 0, fotosPendientes: 0, ultima: null, error: null, cupo: false, freno: null, masAntiguo: null, rechazados: 0 },
   visitas: {},

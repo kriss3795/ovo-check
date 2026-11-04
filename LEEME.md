@@ -86,7 +86,7 @@ Para sumar operarios, el supervisor va a **Ajustes > Teléfonos > Enviar invitac
 
 **Teléfono de la empresa que cambia de operario.** No se desvincula. En ese teléfono se toca **Cambiar de persona** y el operario nuevo elige su nombre y crea su PIN. Si todavía no está en la lista, toca **No estoy en la lista** y un supervisor lo autoriza ahí mismo con su clave (la clave no queda guardada en el teléfono). Si esa persona ya existía y estaba de baja o con licencia, vuelve a quedar activa con su historial.
 
-**Si un teléfono fue desvinculado,** hay dos formas de volver a usarlo: el supervisor toca **Volver a permitir** en Ajustes > Teléfonos (el teléfono se activa solo en un minuto, sin escribir nada), o en el teléfono se toca **Entrar con la clave del plantel** (el nombre del plantel ya viene puesto).
+**Si un teléfono fue desvinculado,** la pantalla ofrece volver a entrar escaneando el QR del plantel, como supervisor con correo y clave, o con el nombre y la clave del plantel; lo guardado en el teléfono no se pierde y se envía al volver al mismo plantel. También hay dos formas sin escribir nada: el supervisor toca **Volver a permitir** en Ajustes > Teléfonos (el teléfono se activa solo en un minuto, sin escribir nada), o en el teléfono se toca **Entrar con la clave del plantel** (el nombre del plantel ya viene puesto).
 
 Si el supervisor quiere una prueba de que el operario estuvo en cada galpón, puede agregar la tarea **Foto al entrar al galpón** desde la biblioteca de tareas: queda con hora, ubicación y nombre.
 

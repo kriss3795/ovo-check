@@ -2120,3 +2120,53 @@ table.datos td.falta {
   border-radius: var(--radio);
   cursor: pointer;
 }
+
+/* Computador: todo a lo ancho, con el menú siempre a la izquierda */
+@media (min-width: 900px) {
+  .sup-cuerpo {
+    max-width: none;
+    padding: 24px 36px 48px;
+  }
+  .sup.escritorio .pantalla {
+    max-width: none;
+    margin: 0;
+    border: 0;
+    min-height: 100dvh;
+  }
+  .sup.escritorio .contenido {
+    width: 100%;
+    max-width: 1240px;
+    padding: 24px 36px 40px;
+  }
+  .sup.escritorio .barra {
+    padding-left: 24px;
+  }
+  .sup.escritorio .pie {
+    padding-left: 36px;
+    padding-right: 36px;
+  }
+  .sup.escritorio .pie > * {
+    max-width: 420px;
+  }
+  .sup.escritorio .lista,
+  .sup.escritorio .tarjeta {
+    max-width: none;
+  }
+}
+@media (min-width: 1400px) {
+  .pestanas {
+    width: 248px;
+  }
+}
+@media (min-width: 1100px) {
+  /* Formularios en dos columnas: los campos se ordenan de a pares, lo demás ocupa todo el ancho. */
+  .sup.escritorio .contenido:has(> label.campo) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 28px;
+    align-content: start;
+  }
+  .sup.escritorio .contenido:has(> label.campo) > :not(label.campo) {
+    grid-column: 1 / -1;
+  }
+}

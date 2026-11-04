@@ -70,11 +70,17 @@ export function Bienvenida() {
     if (leerEstado().plantelSugerido) poner({ plantelSugerido: null });
   }, []);
   const invitado = sugerido || (new URLSearchParams(window.location.search).get('plantel')?.trim() ?? '');
-  const [paso, setPaso] = useState<'inicio' | 'operario' | 'supervisor' | 'crear' | 'olvido'>(invitado ? 'operario' : 'inicio');
+  const [entrada] = useState(() => leerEstado().entradaSugerida);
+  useEffect(() => {
+    if (leerEstado().entradaSugerida) poner({ entradaSugerida: null });
+  }, []);
+  const [paso, setPaso] = useState<'inicio' | 'operario' | 'supervisor' | 'crear' | 'olvido'>(
+    entrada === 'supervisor' ? 'supervisor' : entrada || invitado ? 'operario' : 'inicio',
+  );
   const anterior = useEstado((e) => (e.config && e.dispositivo && !e.desvinculado ? e.config.granja.nombre : ''));
   const qrUnir = useEstado((e) => e.qrUnir);
   if (qrUnir) return <UnirConQR codigo={qrUnir} />;
-  if (paso === 'operario') return <EntrarPlantel volver={() => setPaso('inicio')} inicial={invitado} />;
+  if (paso === 'operario') return <EntrarPlantel volver={() => setPaso('inicio')} inicial={entrada === 'escanear' ? '' : invitado} escanear={entrada === 'escanear'} />;
   if (paso === 'supervisor') return <EntrarSupervisor volver={() => setPaso('inicio')} crear={() => setPaso('crear')} olvido={() => setPaso('olvido')} />;
   if (paso === 'crear') return <CrearGranja volver={() => setPaso('supervisor')} />;
   if (paso === 'olvido') return <RecuperarPorCorreo volver={() => setPaso('supervisor')} />;
@@ -127,13 +133,13 @@ function BotonDemo() {
 }
 
 /** Operario: busca su plantel por el nombre exacto y entra con la clave que creó el supervisor. */
-function EntrarPlantel({ volver, inicial }: { volver: () => void; inicial?: string }) {
+function EntrarPlantel({ volver, inicial, escanear }: { volver: () => void; inicial?: string; escanear?: boolean }) {
   const [nombre, setNombre] = useState(inicial ?? '');
   const [plantel, setPlantel] = useState<{ nombre: string } | null>(null);
   const [clave, setClave] = useState('');
   const [error, setError] = useState('');
   const [ocupado, setOcupado] = useState(false);
-  const [escaneando, setEscaneando] = useState(false);
+  const [escaneando, setEscaneando] = useState(Boolean(escanear));
   useAtras(() => (escaneando ? setEscaneando(false) : plantel ? (setPlantel(null), setClave(''), setError('')) : volver()));
 
   const buscar = async (texto = nombre) => {
@@ -1147,32 +1153,44 @@ export function Desvinculado() {
   const pendientes = useEstado((e) => e.sync.pendientes + e.sync.fotosPendientes);
   const plantel = useEstado((e) => e.config?.granja.nombre ?? '');
   const [ocupado, setOcupado] = useState(false);
+  // Mientras está en esta pantalla, revisa solo cada 30 segundos si el supervisor lo volvió a permitir.
+  useEffect(() => {
+    const t = window.setInterval(() => comprobarVinculo(), 30000);
+    return () => clearInterval(t);
+  }, []);
   const comprobar = async () => {
     setOcupado(true);
     const ok = await comprobarVinculo();
     setOcupado(false);
-    if (!ok) avisar('Todavía no. El supervisor lo permite en Ajustes, Teléfonos.', 'info');
+    if (!ok) avisar('Todavía no. El supervisor lo permite en Ajustes, Equipos y clave del plantel.', 'info');
   };
+  const ir = (entrada: 'operario' | 'supervisor' | 'escanear') => poner({ fase: 'bienvenida', plantelSugerido: entrada === 'operario' ? plantel || null : null, entradaSugerida: entrada });
   return (
     <div className="pantalla blanca">
       <div className="contenido centrado portada">
         <img src="/marca.webp" alt="" width={96} height={96} />
-        <h1 className="titulo">Este teléfono fue desvinculado</h1>
-        <p className="suave">
-          Un supervisor lo quitó{plantel ? ` de ${plantel}` : ' del plantel'}. Lo guardado aquí no se borra. Hay dos formas de volver a usarlo:
-        </p>
+        <h1 className="titulo">Este equipo quedó fuera{plantel ? ` de ${plantel}` : ' del plantel'}</h1>
+        <p className="suave">Lo guardado aquí no se borra. Para volver a entrar:</p>
         {pendientes > 0 && (
           <div className="tarjeta aviso-atencion">
-            Hay {pendientes} registros guardados en este teléfono que no alcanzaron a enviarse. Se enviarán al volver a entrar.
+            Hay {pendientes} registros guardados en este teléfono que no alcanzaron a enviarse. Se envían solos al volver a entrar al mismo plantel.
           </div>
         )}
-        <button className="boton primario grande" onClick={() => poner({ fase: 'bienvenida', plantelSugerido: plantel || null })}>
-          Entrar con la clave del plantel
-        </button>
-        <p className="chico suave" style={{ maxWidth: 340 }}>
-          O el supervisor lo vuelve a permitir desde su equipo, en Ajustes, Teléfonos. Este teléfono se da cuenta solo en un minuto.
+        <div className="pila" style={{ width: '100%' }}>
+          <button className="boton primario grande" onClick={() => ir('escanear')}>
+            <ScanLine size={22} aria-hidden /> Escanear el QR del plantel
+          </button>
+          <button className="boton grande" onClick={() => ir('supervisor')}>
+            <ShieldCheck size={22} aria-hidden /> Soy supervisor: entrar con mi correo
+          </button>
+          <button className="boton" onClick={() => ir('operario')}>
+            Entrar con el nombre y la clave del plantel
+          </button>
+        </div>
+        <p className="chico suave" style={{ maxWidth: 360 }}>
+          Si fue un error, el supervisor lo vuelve a permitir en Ajustes, Equipos y clave del plantel, y este equipo entra solo.
         </p>
-        <button className="boton" disabled={ocupado} onClick={comprobar}>
+        <button className="enlace" disabled={ocupado} onClick={comprobar}>
           {ocupado ? 'Comprobando…' : 'Ya lo permitió: comprobar ahora'}
         </button>
       </div>

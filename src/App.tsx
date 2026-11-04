@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { aprobarQrEntrada, haySesionSupervisor, salirDemo, tocar, verComoDemo } from './lib/app';
 import { avisar, poner, useEstado } from './lib/estado';
 import { mensajeError } from './lib/nube';
@@ -6,8 +6,31 @@ import { AjustePantalla } from './ui/ajustes';
 import { Aviso, Confirmar } from './ui/base';
 import { Bienvenida, CambiarClave, Desvinculado, Ingreso, SinNube } from './ui/inicio';
 import { Falta, FlujoTarea, OpGalpon, OpInicio, Problema } from './ui/operario';
-import { GalponDia, PersonaDia, RegistroDetalle, Supervisor } from './ui/supervisor';
+import { GalponDia, Navegacion, PersonaDia, RegistroDetalle, Supervisor } from './ui/supervisor';
 import { AreaInicio, FormGestion } from './ui/areas';
+
+const consulta = typeof window !== 'undefined' ? window.matchMedia('(min-width: 900px)') : null;
+/** Pantalla ancha (computador): el menú de secciones queda siempre a la izquierda, como en un programa. */
+function useEscritorio() {
+  return useSyncExternalStore(
+    (f) => (consulta?.addEventListener('change', f), () => consulta?.removeEventListener('change', f)),
+    () => Boolean(consulta?.matches),
+  );
+}
+
+/** En el computador, las pantallas de detalle del supervisor se abren al lado del menú, a todo el ancho. */
+function ConMenu({ children }: { children: ReactNode }) {
+  const escritorio = useEscritorio();
+  const sup = useEstado((e) => e.usuario?.rol === 'supervisor');
+  const tab = useEstado((e) => e.ruta[0]?.tab ?? 'hoy');
+  if (!escritorio || !sup) return <>{children}</>;
+  return (
+    <div className="sup escritorio">
+      <div className="sup-principal">{children}</div>
+      <Navegacion tab={tab} raiz />
+    </div>
+  );
+}
 
 function Pantalla() {
   const fase = useEstado((e) => e.fase);
@@ -33,6 +56,11 @@ function Pantalla() {
 
   // La clave incluye la profundidad para que cada pantalla nueva parta limpia.
   const k = `${profundidad}-${ruta.p}`;
+  if (ruta.p === 'sup') return <Supervisor key={k} tab={ruta.tab ?? 'hoy'} />;
+  return <ConMenu>{detalle(ruta, k)}</ConMenu>;
+}
+
+function detalle(ruta: { p: string; [k: string]: any }, k: string) {
   switch (ruta.p) {
     case 'op':
       return <OpInicio key={k} />;
