@@ -591,6 +591,87 @@ export async function guardarRegistro(reg: Registro, fotos: FotoNueva[]) {
   sincronizar();
 }
 
+/** Trae el inventario del servidor (solo supervisor). Sin conexión queda el último que se trajo. */
+export async function traerSaldos(): Promise<void> {
+  const e = leerEstado();
+  try {
+    const r: any = await rpc('oc_saldos', { token: e.dispositivo!.token, sesion: sesionDe(e.usuario) });
+    const saldos = (r.saldos ?? []).map((x: any) => ({ ...x, q: Number(x.q), diferencia: x.diferencia == null ? null : Number(x.diferencia) }));
+    poner({ saldos, saldosHora: Date.now() });
+    await idb.guardar('kv', { saldos, hora: Date.now() }, 'saldos');
+  } catch (err) {
+    manejarErrorSesion(err);
+    if (!leerEstado().saldos) {
+      const guardado = await idb.leer<{ saldos: any[]; hora: number }>('kv', 'saldos').catch(() => undefined);
+      if (guardado) poner({ saldos: guardado.saldos, saldosHora: guardado.hora });
+    }
+    throw err;
+  }
+}
+
+/** Bitácora del plantel (solo supervisor). */
+export async function verBitacora(): Promise<{ creado: string; usuario: string | null; accion: string; detalle: string[] }[]> {
+  const e = leerEstado();
+  try {
+    return await rpc('oc_bitacora_ver', { token: e.dispositivo!.token, sesion: sesionDe(e.usuario), limite: 300 });
+  } catch (err) {
+    manejarErrorSesion(err);
+    throw err;
+  }
+}
+
+/**
+ * Arma un registro de gestión (sala de proceso, bodega, despacho, recuperación, insumos, sanidad, lote) con los datos
+ * comunes: quién, cuándo, aves del momento no aplican. La hora la pone el servidor al recibirlo.
+ */
+export function registroGestion(p: {
+  tipo: Registro['tipo'];
+  lugar: string;
+  lugarNombre: string;
+  detalle: Record<string, any>;
+  mov?: Registro['mov'];
+  nota?: string;
+  fotos?: { id: string; etiqueta: string }[];
+  flags?: Registro['flags'];
+  avisos?: string[];
+  corrige?: Registro | null;
+  motivo?: string;
+  anulado?: boolean;
+  fecha?: string;
+}): Registro {
+  const e = leerEstado();
+  const u = e.usuario!;
+  return {
+    id: uid(),
+    tipo: p.tipo,
+    fecha: p.fecha ?? p.corrige?.fecha ?? fechaLocal(ahora()),
+    galpon_id: p.lugar,
+    tarea_id: null,
+    usuario_id: u.id,
+    usuario_nombre: u.nombre,
+    galpon_nombre: p.lugarNombre,
+    tarea: null,
+    valores: [],
+    indicadores: [],
+    ok: null,
+    categoria: null,
+    nota: (p.nota ?? '').trim(),
+    fotos: p.fotos ?? [],
+    flags: [...(p.flags ?? []), ...(p.avisos?.length ? (['ilogico'] as const) : [])],
+    ...(p.avisos?.length ? { avisos: p.avisos } : {}),
+    lat: null,
+    lng: null,
+    precision: null,
+    capturado_dispositivo: ahora().toISOString(),
+    omitida: false,
+    anulado: Boolean(p.anulado),
+    corrige: p.corrige?.id ?? null,
+    motivo: p.motivo ?? '',
+    detalle: p.detalle,
+    mov: p.anulado ? [] : (p.mov ?? []),
+  };
+}
+
 export async function revisar(registroId: string, nota: string) {
   const e = leerEstado();
   const v: Revision = { id: uid(), registro_id: registroId, usuario_id: e.usuario!.id, nota: nota.trim(), creado: ahora().toISOString() };

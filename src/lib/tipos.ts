@@ -12,12 +12,21 @@ export interface Usuario {
   correo?: string;
   /** Clave temporal de supervisor: debe cambiarla al entrar. */
   temporal?: boolean;
+  /** Áreas que registra un operario. Sin definir = solo galpones. */
+  areas?: Area[];
 }
+
+/** Lo que puede registrar un operario. Cada una corresponde a un módulo que el supervisor prende o apaga. */
+export type Area = 'galpones' | 'proceso' | 'bodega' | 'despachos' | 'recuperacion' | 'insumos' | 'sanidad';
 
 export interface Galpon {
   id: string;
   nombre: string;
   aves: number | null;
+  /** Producción (postura o reproductoras) o recría de pollitas. Sin definir = producción. */
+  tipo?: 'produccion' | 'recria';
+  /** Lote que está hoy en el galpón (ficha en Gestión, Lotes). */
+  lote_id?: string | null;
   lote: string;
   lat: number | null;
   lng: number | null;
@@ -94,6 +103,8 @@ export interface Tarea {
   dias: number[];
   /** null = todos los galpones. */
   galpones: string[] | null;
+  /** En qué galpones se pide según su tipo. Sin definir = solo en los de producción. */
+  etapa?: 'produccion' | 'recria' | 'todas';
   activo: boolean;
   /** Día desde el que se pide la tarea (AAAA-MM-DD). Los días anteriores no la muestran como sin registrar. */
   desde?: string;
@@ -117,6 +128,97 @@ export interface Config {
   logica?: Partial<Logica>;
   /** Último día en que un supervisor descargó el respaldo de los datos, y quién. */
   respaldo?: { fecha: string; por: string };
+  // ---- Gestión (todo opcional: un plantel antiguo funciona igual)
+  /** Módulos prendidos. Los que falten usan el valor por defecto de la app. */
+  modulos?: Partial<Modulos>;
+  lotes?: Lote[];
+  bodegas?: Catalogo[];
+  calibres?: Catalogo[];
+  /** Causas de merma en la sala de proceso. */
+  mermas?: Catalogo[];
+  envases?: Envases;
+  clientes?: Contacto[];
+  proveedores?: Contacto[];
+  insumos?: Insumo[];
+  plan_sanitario?: PlanSanitario[];
+}
+
+export interface Modulos {
+  lotes: boolean;
+  recria: boolean;
+  proceso: boolean;
+  bodega: boolean;
+  despachos: boolean;
+  recuperacion: boolean;
+  insumos: boolean;
+  sanidad: boolean;
+  comercial: boolean;
+}
+
+export interface Catalogo {
+  id: string;
+  nombre: string;
+  activo: boolean;
+}
+
+export interface Envases {
+  huevos_bandeja: number;
+  bandejas_caja: number;
+}
+
+export interface Lote {
+  id: string;
+  nombre: string;
+  /** Línea genética, por ejemplo Lohmann Brown. */
+  linea: string;
+  /** Día de nacimiento: con él se calcula la edad en semanas. */
+  nacimiento: string | null;
+  /** Día en que entró al plantel. */
+  ingreso: string;
+  aves_iniciales: number | null;
+  galpon_id: string | null;
+  etapa: 'recria' | 'produccion';
+  estado: 'activo' | 'cerrado';
+  cierre?: string;
+  /** Semana de edad en que se planea cerrar el ciclo (para la proyección). */
+  semana_cierre: number | null;
+  notas?: string;
+}
+
+export interface Contacto {
+  id: string;
+  nombre: string;
+  rut: string;
+  telefono: string;
+  correo: string;
+  direccion: string;
+  notas: string;
+  activo: boolean;
+}
+
+export type CategoriaInsumo = 'alimento' | 'vacuna' | 'medicamento' | 'desinfectante' | 'envase' | 'otro';
+
+export interface Insumo {
+  id: string;
+  nombre: string;
+  categoria: CategoriaInsumo;
+  unidad: string;
+  /** Bajo esta cantidad se avisa al supervisor. */
+  minimo: number | null;
+  activo: boolean;
+}
+
+/** Vacuna o tratamiento planificado por edad del lote. */
+export interface PlanSanitario {
+  id: string;
+  producto: string;
+  /** Semana de edad del lote en que corresponde. */
+  semana: number;
+  via: string;
+  /** Solo para lotes en esta etapa; sin definir = todos. */
+  etapa?: 'recria' | 'produccion';
+  insumo_id?: string | null;
+  notas: string;
 }
 
 export interface FotoRef {
@@ -134,9 +236,29 @@ export type Flag =
   | 'omitida' // el operario indicó que hoy no se pudo hacer
   | 'temprano'; // tarea de la tarde registrada en la mañana
 
+export type TipoRegistro = 'tarea' | 'problema' | 'proceso' | 'bodega' | 'despacho' | 'recuperacion' | 'insumo' | 'sanidad' | 'lote';
+
+/**
+ * Movimiento de inventario que deja un registro: suma o resta `q` del artículo `k` en el lugar `b`.
+ * Con `set` es un conteo físico: deja el saldo exactamente en `q`. Huevos en unidades; insumos en su unidad.
+ */
+export interface Mov {
+  b: string;
+  k: string;
+  q: number;
+  set?: boolean;
+}
+
+/** Cantidad de huevos de un calibre (o de otra clase). */
+export interface ItemHuevos {
+  k: string;
+  huevos: number;
+  precio?: number | null;
+}
+
 export interface Registro {
   id: string;
-  tipo: 'tarea' | 'problema';
+  tipo: TipoRegistro;
   fecha: string; // día operativo, AAAA-MM-DD
   galpon_id: string;
   tarea_id: string | null;
@@ -172,6 +294,10 @@ export interface Registro {
   aves_fecha?: string;
   /** Qué quedó fuera de lo lógico, en palabras, para el supervisor. */
   avisos?: string[];
+  /** Datos propios de los registros de gestión (sala de proceso, bodega, despachos, insumos, sanidad, lotes). */
+  detalle?: Record<string, any>;
+  /** Movimientos de inventario que produce el registro. */
+  mov?: Mov[];
   /** El reloj del teléfono estaba más atrás que la última hora conocida (segundos). Señal de reloj cambiado a mano. */
   reloj_atras_s?: number;
   // Lo siguiente lo pone el servidor al recibir.

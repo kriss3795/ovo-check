@@ -16,6 +16,17 @@ export interface Visita {
   abierta: number;
 }
 
+/** Saldo de un artículo en un lugar del inventario. */
+export interface Saldo {
+  b: string;
+  k: string;
+  q: number;
+  /** Último conteo físico, y cuánto difería de lo que decía el sistema en ese momento. */
+  conteo: string | null;
+  diferencia: number | null;
+  ultimo: string | null;
+}
+
 export interface Sync {
   enLinea: boolean;
   ocupado: boolean;
@@ -48,6 +59,9 @@ export interface Estado {
   fotosNube: { usadas: number; max: number; dias: number; lleno?: boolean } | null;
   /** El servidor avisó que se quedó sin espacio para registros nuevos. */
   servidorLleno: boolean;
+  /** Inventario según el servidor (solo supervisor), y cuándo se trajo. */
+  saldos: Saldo[] | null;
+  saldosHora: number | null;
   /** Clave del plantel para operarios. Solo la recibe un supervisor con sesión. */
   clavePlantel: string | null;
   /** Claves del plantel equivocadas en las últimas 24 horas. */
@@ -85,6 +99,8 @@ let estado: Estado = {
   desvinculados: [],
   fotosNube: null,
   servidorLleno: false,
+  saldos: null,
+  saldosHora: null,
   clavePlantel: null,
   intentosFallidos: 0,
   desvinculado: false,
