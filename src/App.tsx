@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { aprobarQrEntrada, haySesionSupervisor, salirDemo, tocar, verComoDemo } from './lib/app';
+import { aprobarQrEntrada, haySesionSupervisor, tocar } from './lib/app';
+import { FranjaDemo } from './ui/demo';
 import { avisar, poner, useEstado } from './lib/estado';
 import { mensajeError } from './lib/nube';
 import { AjustePantalla } from './ui/ajustes';
@@ -151,25 +152,6 @@ function AprobarEntrada() {
   );
 }
 
-/** Franja fija en la demostración: cambiar entre operario y supervisor con un toque, o salir. */
-function FranjaDemo() {
-  const demo = useEstado((e) => Boolean((e.config as any)?.demo) && e.fase === 'app');
-  const rol = useEstado((e) => e.usuario?.rol);
-  const nombre = useEstado((e) => e.usuario?.nombre);
-  if (!demo) return null;
-  return (
-    <div className="franja-demo" role="region" aria-label="Demostración">
-      <span>
-        <b>Demostración</b> con datos de ejemplo. Estás viendo la app como {rol === 'operario' ? `operario (${nombre})` : 'supervisor'}.
-      </span>
-      <span className="franja-demo-botones">
-        <button onClick={() => verComoDemo(rol === 'operario' ? 'supervisor' : 'operario')}>Ver como {rol === 'operario' ? 'supervisor' : 'operario'}</button>
-        <button onClick={() => salirDemo()}>Salir</button>
-      </span>
-    </div>
-  );
-}
-
 export function App() {
   useEffect(() => {
     const f = () => tocar();
@@ -178,8 +160,8 @@ export function App() {
   }, []);
   return (
     <>
-      <Pantalla />
       <FranjaDemo />
+      <Pantalla />
       <AprobarEntrada />
       <Aviso />
       <VersionNueva />

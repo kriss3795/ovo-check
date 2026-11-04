@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ChartLine, Boxes,
+  ChartLine, Boxes, Sheet,
   Ban, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Download, History, House, MapPin, Pencil,
   Settings, ShieldAlert, Smartphone, TriangleAlert, CircleX, Images,
 } from 'lucide-react';
@@ -21,6 +21,8 @@ import { AvisoServidor, AvisoSinEnviar, Barra, Envio, Foto, Hoja, Huevo, IconoTa
 import { Ajustes } from './ajustes';
 import { Produccion } from './produccion';
 import { Gestion } from './gestion';
+import { Planilla } from './planilla';
+import { FranjaDemo } from './demo';
 import { ES_GESTION, resumenGestion, tituloGestion } from '../lib/modulos';
 import { TarjetaAvisos } from './avisos';
 import { EtiquetaEstado, Falta, useIndice } from './operario';
@@ -53,6 +55,7 @@ const PESTANAS = [
   { id: 'hoy', nombre: 'Hoy', C: House },
   { id: 'alertas', nombre: 'Alertas', C: Bell },
   { id: 'produccion', nombre: 'Producción', C: ChartLine },
+  { id: 'planilla', nombre: 'Planilla', C: Sheet },
   { id: 'gestion', nombre: 'Gestión', C: Boxes },
   { id: 'historial', nombre: 'Historial', C: History },
   { id: 'ajustes', nombre: 'Ajustes', C: Settings },
@@ -78,6 +81,7 @@ export function Navegacion({ tab, raiz = false }: { tab: string; raiz?: boolean 
           {t.id === 'alertas' && criticos.length > 0 && <span className="globo">{criticos.length}</span>}
         </button>
       ))}
+      <FranjaDemo enMenu />
     </nav>
   );
 }
@@ -104,6 +108,7 @@ export function Supervisor({ tab }: { tab: string }) {
           {tab === 'alertas' && <Alertas />}
           {tab === 'produccion' && <Produccion />}
           {tab === 'gestion' && <Gestion />}
+          {tab === 'planilla' && <Planilla />}
           {tab === 'historial' && <Historial />}
           {tab === 'ajustes' && <Ajustes />}
         </main>
