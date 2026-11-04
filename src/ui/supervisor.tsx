@@ -5,7 +5,7 @@ import {
   Settings, ShieldAlert, Smartphone, TriangleAlert, CircleX, Images,
 } from 'lucide-react';
 import { administrar, ahora, asegurarPeriodo, guardarConfig, revisar, traerPeriodo } from '../lib/app';
-import { avisar, cambiarRuta, ir, useEstado } from '../lib/estado';
+import { avisar, cambiarRuta, ir, irRaiz, useEstado } from '../lib/estado';
 import { armarCsv, entregarArchivo } from '../lib/exportar';
 import { HOJAS, armarExcel, type Hoja as HojaExcel } from '../lib/excel';
 import { anotarBajada, descargarFotos, fotosDe, fotosPorVencer, nombreFoto } from '../lib/fotos';
@@ -58,6 +58,30 @@ const PESTANAS = [
   { id: 'ajustes', nombre: 'Ajustes', C: Settings },
 ] as const;
 
+/** Menú de secciones: abajo en el celular, a la izquierda en el computador (también dentro de cada pantalla de detalle). */
+export function Navegacion({ tab, raiz = false }: { tab: string; raiz?: boolean }) {
+  const { criticos } = usePendientes();
+  return (
+    <nav className="pestanas" aria-label="Secciones">
+      <div className="marca-linea">
+        <img src="/marca.webp" alt="" />
+        <b style={{ fontSize: 19 }}>Ovo Check</b>
+      </div>
+      {PESTANAS.map((t) => (
+        <button
+          key={t.id}
+          aria-current={tab === t.id ? 'page' : undefined}
+          onClick={() => (raiz ? irRaiz({ p: 'sup', tab: t.id }) : cambiarRuta({ tab: t.id }), window.scrollTo(0, 0))}
+        >
+          <t.C size={24} aria-hidden />
+          {t.nombre}
+          {t.id === 'alertas' && criticos.length > 0 && <span className="globo">{criticos.length}</span>}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 export function Supervisor({ tab }: { tab: string }) {
   const config = useEstado((e) => e.config)!;
   const usuario = useEstado((e) => e.usuario)!;
@@ -84,19 +108,7 @@ export function Supervisor({ tab }: { tab: string }) {
           {tab === 'ajustes' && <Ajustes />}
         </main>
       </div>
-      <nav className="pestanas" aria-label="Secciones">
-        <div className="marca-linea">
-          <img src="/marca.webp" alt="" />
-          <b style={{ fontSize: 19 }}>Ovo Check</b>
-        </div>
-        {PESTANAS.map((t) => (
-          <button key={t.id} aria-current={tab === t.id ? 'page' : undefined} onClick={() => (cambiarRuta({ tab: t.id }), window.scrollTo(0, 0))}>
-            <t.C size={24} aria-hidden />
-            {t.nombre}
-            {t.id === 'alertas' && criticos.length > 0 && <span className="globo">{criticos.length}</span>}
-          </button>
-        ))}
-      </nav>
+      <Navegacion tab={tab} />
     </div>
   );
 }
