@@ -1,4 +1,4 @@
-import type { Campo, Tarea } from './tipos';
+import type { Campo, Tarea, Config } from './tipos';
 import { uid } from './util';
 
 type Base = Omit<Tarea, 'id' | 'activo' | 'galpones'>;
@@ -92,6 +92,8 @@ export const RUTINA_CLASICA: Base[] = [
   },
   {
     nombre: 'Huevos recolectados',
+    rubros: ['postura'],
+    etapa: 'produccion',
     icono: 'huevo',
     tipo: 'numero',
     ayuda: 'Total de huevos del día en este galpón.',
@@ -114,6 +116,8 @@ export const RUTINA_CLASICA: Base[] = [
   },
   {
     nombre: 'Nidos y cintas de huevo',
+    rubros: ['postura', 'reproductora'],
+    etapa: 'produccion',
     icono: 'nido',
     tipo: 'check',
     ayuda: 'Nidos limpios, cintas funcionando, sin huevos acumulados ni rotos.',
@@ -125,6 +129,7 @@ export const RUTINA_CLASICA: Base[] = [
   },
   {
     nombre: 'Pesaje de aves',
+    rubros: ['postura', 'reproductora'],
     icono: 'balanza',
     tipo: 'numero',
     ayuda: 'Pesa las aves de a una y anota cada peso. La app saca el promedio.',
@@ -556,6 +561,7 @@ export const BIBLIOTECA: Base[] = [
   },
   {
     nombre: 'Pesaje de pollos',
+    rubros: ['engorda'],
     icono: 'balanza',
     tipo: 'numero',
     ayuda: 'Pesa los pollos de a uno, en distintos puntos del galpón, y anota cada peso en gramos. La app saca el promedio.',
@@ -567,6 +573,7 @@ export const BIBLIOTECA: Base[] = [
   },
   {
     nombre: 'Descarte de aves',
+    rubros: ['engorda', 'reproductora'],
     icono: 'ave',
     tipo: 'numero',
     ayuda: 'Aves eliminadas hoy por cojera, bajo peso u otra causa (no las muertas).',
@@ -578,6 +585,7 @@ export const BIBLIOTECA: Base[] = [
   },
   {
     nombre: 'Raleo o retiro de pollos',
+    rubros: ['engorda'],
     icono: 'ave',
     tipo: 'numero',
     ayuda: 'Aves que salieron hoy a la planta y los kilos de la guía.',
@@ -589,6 +597,8 @@ export const BIBLIOTECA: Base[] = [
   },
   {
     nombre: 'Huevos de reproductoras',
+    rubros: ['reproductora'],
+    etapa: 'produccion',
     icono: 'huevo',
     tipo: 'numero',
     ayuda: 'Cuenta los huevos de la recolección: el total, los incubables, los de piso y los comerciales o descarte.',
@@ -605,6 +615,7 @@ export const BIBLIOTECA: Base[] = [
   },
   {
     nombre: 'Alimento de machos',
+    rubros: ['reproductora'],
     icono: 'alimento',
     tipo: 'numero',
     ayuda: 'Kilos entregados en el comedero de los machos.',
@@ -616,6 +627,7 @@ export const BIBLIOTECA: Base[] = [
   },
   {
     nombre: 'Pesaje de machos',
+    rubros: ['reproductora'],
     icono: 'balanza',
     tipo: 'numero',
     ayuda: 'Pesa los machos de a uno y anota cada peso en gramos.',
@@ -627,6 +639,7 @@ export const BIBLIOTECA: Base[] = [
   },
   {
     nombre: 'Mortalidad de machos',
+    rubros: ['reproductora'],
     icono: 'ave',
     tipo: 'numero',
     ayuda: 'Machos muertos o eliminados hoy.',
@@ -708,3 +721,39 @@ export const CATEGORIAS_PROBLEMA = [
 
 export const MOTIVOS_OMITIR = ['No corresponde hoy', 'Equipo en mal estado', 'Faltan insumos', 'No alcancé'];
 export const MOTIVOS_CORREGIR = ['Me equivoqué al anotar', 'Leí mal el instrumento', 'Cambió durante el día'];
+
+/** Tareas que necesita cada tipo de aves, además de la rutina común (temperatura, agua, mortalidad, alimento…). */
+export const TAREAS_POR_RUBRO: Record<'postura' | 'reproductora' | 'engorda', string[]> = {
+  postura: ['Huevos recolectados', 'Nidos y cintas de huevo', 'Pesaje de aves'],
+  reproductora: ['Huevos de reproductoras', 'Nidos y cintas de huevo', 'Pesaje de aves', 'Alimento de machos', 'Pesaje de machos', 'Mortalidad de machos', 'Descarte de aves'],
+  engorda: ['Pesaje de pollos', 'Descarte de aves', 'Raleo o retiro de pollos'],
+};
+/** Las tareas exclusivas de un tipo de aves (para no pedírselas a los demás galpones). */
+const RUBROS_DE: Record<string, ('postura' | 'reproductora' | 'engorda')[]> = Object.fromEntries(
+  [...RUTINA_CLASICA, ...BIBLIOTECA].filter((b) => b.rubros?.length).map((b) => [b.nombre, b.rubros!]),
+);
+
+/**
+ * Deja el plantel listo para un galpón de ese tipo: agrega las tareas que le faltan (con su filtro de tipo de aves) y marca
+ * las tareas clásicas que existían sin filtro, para que a cada galpón se le pida solo lo suyo. No borra nada.
+ */
+export function asegurarTareas(c: Config, rubro: 'postura' | 'reproductora' | 'engorda', desde: string): string[] {
+  const agregadas: string[] = [];
+  for (const t of c.tareas) {
+    const r = RUBROS_DE[t.nombre];
+    if (r && !t.rubros?.length) t.rubros = [...r];
+    if (t.nombre === 'Huevos recolectados' && !t.etapa) t.etapa = 'produccion';
+  }
+  for (const nombre of TAREAS_POR_RUBRO[rubro]) {
+    const ya = c.tareas.find((t) => t.nombre === nombre);
+    if (ya) {
+      if (ya.rubros?.length && !ya.rubros.includes(rubro)) ya.rubros = [...ya.rubros, rubro];
+      continue;
+    }
+    const b = [...RUTINA_CLASICA, ...BIBLIOTECA].find((x) => x.nombre === nombre);
+    if (!b) continue;
+    c.tareas.push(tareaDesde(b, desde));
+    agregadas.push(nombre);
+  }
+  return agregadas;
+}

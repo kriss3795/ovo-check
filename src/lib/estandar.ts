@@ -10,6 +10,9 @@ export { LINEAS, LINEAS_BROILER };
 export type Rubro = 'postura' | 'reproductora' | 'engorda';
 export const lineaBroiler = (id: string | null | undefined): LineaBroiler | undefined => (id ? LINEAS_BROILER.find((l) => l.id === id) : undefined);
 export const rubroDe = (lineaId: string | null | undefined): Rubro => lineaBroiler(lineaId)?.tipo ?? 'postura';
+/** Tipo de aves de un galpón: el que eligió el supervisor o, si no, el de su línea genética. */
+export const rubroGalpon = (g: Pick<Galpon, 'rubro' | 'linea'> | undefined): Rubro => g?.rubro ?? rubroDe(g?.linea);
+export const NOMBRE_RUBRO: Record<Rubro, string> = { postura: 'Ponedoras', reproductora: 'Reproductoras broiler', engorda: 'Pollos de engorda' };
 export const nombreLinea = (id: string | null | undefined) => (id ? (LINEAS.find((l) => l.id === id)?.nombre ?? lineaBroiler(id)?.nombre ?? id) : '');
 
 /** Lo que dice la guía para una semana de edad (interpolado entre semanas publicadas). */
@@ -129,7 +132,7 @@ export function rotuloEstandar(lineaId: string, semana: number) {
 export function edadTexto(g: Galpon | undefined, fecha: string): string | null {
   const s = edadSemanas(g, fecha);
   if (s == null) return null;
-  return rubroDe(g?.linea) === 'engorda' ? `día ${Math.round(s * 7)}` : semanaTexto(s);
+  return rubroGalpon(g) === 'engorda' ? `día ${Math.round(s * 7)}` : semanaTexto(s);
 }
 
 /**
@@ -169,7 +172,7 @@ export function avisosCurva(p: {
       out.push(`Peso de huevo ${num(gr, 1)} g: ${num(e.pesoHuevo - gr, 1)} g bajo el ${rot} (${num(e.pesoHuevo, 1)} g)`);
     }
     if (tipo === 'peso_ave' && e.pesoAve != null) {
-      const rubro = rubroDe(g.linea);
+      const rubro = rubroGalpon(g);
       if (gr < e.pesoAve * 0.2 && !/kg/i.test(c.unidad)) {
         out.push(`Peso ${num(v, 2)} ${c.unidad}: parece anotado en kilos y no en gramos (la guía dice ${num(e.pesoAve)} g)`);
         return;

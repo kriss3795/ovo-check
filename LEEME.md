@@ -138,7 +138,7 @@ Las curvas salen de las guías de cada empresa genética (punto medio de sus ran
 
 ## Ponedoras, reproductoras broiler y pollos de engorda
 
-La misma app sirve para los tres. Lo que cambia se elige en cada galpón (**Ajustes > Galpones > el galpón > Línea genética**):
+La misma app sirve para los tres. Al **agregar un galpón** lo primero es elegir **qué aves tiene** (ponedoras, reproductoras broiler o pollos de engorda) y su **etapa** (recría o producción); después la línea genética (solo las de ese tipo), la fecha de nacimiento o de recepción, y las aves alojadas (en reproductoras, hembras y machos). Son obligatorios. Con eso todo se adapta solo: al guardar, la app agrega las tareas que ese tipo de aves necesita y a cada galpón se le pide solo lo suyo (a uno de engorda no se le piden huevos; a uno de reproductoras, los huevos incubables y lo de los machos), y las curvas, alertas e indicadores son los de su línea.
 
 - **Ponedoras:** Hy-Line Brown, W-36, W-80, Lohmann Brown-Classic y LSL-Classic. Edad en semanas.
 - **Reproductoras broiler:** Ross 308 y Cobb 500 FF (recría y producción). Se compara el peso de la hembra (bajo y sobre la guía: en reproductoras pasarse también es un problema), el alimento, la postura y el peso de huevo. Para recolectar se usa la tarea *Huevos de reproductoras* (totales, incubables, de piso y comerciales), y hay tareas para alimento, pesaje y mortalidad de machos.

@@ -29,6 +29,10 @@ export interface Galpon {
   aves: number | null;
   /** Producción (postura o reproductoras) o recría de pollitas. Sin definir = producción. */
   tipo?: 'produccion' | 'recria';
+  /** Qué aves tiene: ponedoras comerciales, reproductoras broiler o pollos de engorda. Sin definir = según la línea (ponedoras). */
+  rubro?: 'postura' | 'reproductora' | 'engorda';
+  /** Reproductoras: machos alojados (las aves del galpón son las hembras). */
+  machos?: number | null;
   /** Lote que está hoy en el galpón (ficha en Gestión, Lotes). */
   lote_id?: string | null;
   lote: string;
@@ -123,6 +127,8 @@ export interface Tarea {
   desde?: string;
   /** Períodos en que estuvo en pausa. */
   pausas?: Pausa[];
+  /** Tipos de aves a los que se le pide (sin definir = a todos). */
+  rubros?: ('postura' | 'reproductora' | 'engorda')[];
 }
 
 export interface Granja {

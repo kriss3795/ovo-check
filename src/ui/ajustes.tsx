@@ -6,11 +6,11 @@ import {
 import { administrar, ahora, anonimizarPersona, diagnostico, guardarConfig, invitacionQR, salir } from '../lib/app';
 import { createPortal } from 'react-dom';
 import { CodigoQR, EscanerQR, codigoLegible, enlaceUnirse, leerQR } from './qr';
-import { LINEAS, LINEAS_BROILER, edadTexto, rubroDe } from '../lib/estandar';
+import { LINEAS, LINEAS_BROILER, NOMBRE_RUBRO, edadTexto, nombreLinea, rubroDe, rubroGalpon, type Rubro } from '../lib/estandar';
 import { avisar, ir, poner, useEstado, volver } from '../lib/estado';
 import { anotarPausa, cargaDiaria, limitesDe, limitesSugeridos, LOGICA_DEFECTO, logicaDe, NOMBRE_BLOQUE, unidadResultado } from '../lib/logica';
 import { mensajeError } from '../lib/nube';
-import { BIBLIOTECA, GRUPOS_TAREAS, RUTINA_CLASICA, campoAvesVivas, campoVacio, tareaDesde, tareaVacia } from '../lib/plantillas';
+import { BIBLIOTECA, GRUPOS_TAREAS, RUTINA_CLASICA, asegurarTareas, campoAvesVivas, campoVacio, tareaDesde, tareaVacia } from '../lib/plantillas';
 import type { Campo, Config, Galpon, Tarea, Usuario } from '../lib/tipos';
 import { DIAS_CORTOS, leerNumero, claveDebil, fechaLarga, fechaLocal, fechaRelativa, haceCuanto, hashPin, iniciales, nombreDia, num, uid } from '../lib/util';
 import { Barra, Confirmar, Hoja, ICONOS, IconoTarea, Interruptor, aNumero } from './base';
@@ -607,7 +607,7 @@ function Galpones() {
                   {g.nombre}
                 </span>
                 <span className="fila-detalle" style={{ display: 'block' }}>
-                  {[g.aves ? `${num(g.aves)} aves` : 'Falta anotar las aves', g.lote && `lote ${g.lote}`, (g.encargados ?? []).length ? `a cargo de ${(g.encargados ?? []).map((id) => config.usuarios.find((u) => u.id === id)?.nombre.split(' ')[0]).filter(Boolean).join(' y ')}` : 'sin encargado'].filter(Boolean).join(', ')}
+                  {[NOMBRE_RUBRO[rubroGalpon(g)] + (g.tipo === 'recria' ? ', recría' : ''), g.linea && nombreLinea(g.linea), edadTexto(g, fechaLocal(ahora())), g.aves ? `${num(g.aves)} aves` : 'Falta anotar las aves', g.lote && `lote ${g.lote}`, (g.encargados ?? []).length ? `a cargo de ${(g.encargados ?? []).map((id) => config.usuarios.find((u) => u.id === id)?.nombre.split(' ')[0]).filter(Boolean).join(' y ')}` : 'sin encargado'].filter(Boolean).join(', ')}
                 </span>
               </span>
               {!g.activo && <span className="etiqueta">En descanso</span>}
@@ -626,36 +626,37 @@ function Galpones() {
 }
 
 /** Línea genética y fecha de nacimiento: con eso se compara el galpón contra la curva de su genética. */
-function CamposGenetica(p: { linea: string; nacimiento: string; alCambiar: (c: { linea?: string; nacimiento?: string }) => void; hoy: string }) {
-  const engorda = rubroDe(p.linea) === 'engorda';
-  const edad = p.nacimiento ? edadTexto({ nacimiento: p.nacimiento, linea: p.linea } as Galpon, p.hoy) : null;
+function CamposGenetica(p: { rubro?: Rubro | null; linea: string; nacimiento: string; alCambiar: (c: { linea?: string; nacimiento?: string }) => void; hoy: string }) {
+  const engorda = (p.rubro ?? rubroDe(p.linea)) === 'engorda';
+  const ver = (r: Rubro) => !p.rubro || p.rubro === r;
+  const edad = p.nacimiento ? edadTexto({ nacimiento: p.nacimiento, linea: p.linea, rubro: p.rubro ?? undefined } as Galpon, p.hoy) : null;
   return (
     <>
       <label className="campo">
         <span>Línea genética</span>
         <select className="entrada" value={p.linea} onChange={(e) => p.alCambiar({ linea: e.target.value })}>
           <option value="">Otra, o no comparar con una curva</option>
-          <optgroup label="Ponedoras">
+          {ver('postura') && <optgroup label="Ponedoras">
             {LINEAS.map((l) => (
               <option key={l.id} value={l.id}>
                 {l.nombre}
               </option>
             ))}
-          </optgroup>
-          <optgroup label="Reproductoras broiler (recría y producción)">
+          </optgroup>}
+          {ver('reproductora') && <optgroup label="Reproductoras broiler (recría y producción)">
             {LINEAS_BROILER.filter((l) => l.tipo === 'reproductora').map((l) => (
               <option key={l.id} value={l.id}>
                 {l.nombre}
               </option>
             ))}
-          </optgroup>
-          <optgroup label="Pollo de engorda">
+          </optgroup>}
+          {ver('engorda') && <optgroup label="Pollo de engorda">
             {LINEAS_BROILER.filter((l) => l.tipo === 'engorda').map((l) => (
               <option key={l.id} value={l.id}>
                 {l.nombre}
               </option>
             ))}
-          </optgroup>
+          </optgroup>}
         </select>
         <small>
           Con la línea y la edad, la app compara {engorda ? 'el peso, el consumo y la conversión' : 'la postura, el alimento y los pesos'} con la curva de la guía
@@ -716,7 +717,7 @@ function HojaLoteNuevo({ galpon, cerrar }: { galpon: Galpon; cerrar: () => void 
         <input className="entrada" inputMode="numeric" value={aves} onChange={(e) => setAves(e.target.value.replace(/[^\d.]/g, ''))} placeholder="Por ejemplo: 12000" />
         <small>Si todavía no llegan, déjalo en blanco y anótalo después.</small>
       </label>
-      <CamposGenetica linea={gen.linea} nacimiento={gen.nacimiento} hoy={hoy} alCambiar={(c) => setGen((x) => ({ ...x, ...c }))} />
+      <CamposGenetica rubro={rubroGalpon(galpon)} linea={gen.linea} nacimiento={gen.nacimiento} hoy={hoy} alCambiar={(c) => setGen((x) => ({ ...x, ...c }))} />
       <Interruptor activo={descanso} alCambiar={setDescanso}>
         <b>Dejarlo en descanso por ahora</b>
         <br />
@@ -734,6 +735,9 @@ function EditorGalpon({ id }: { id: string }) {
   const original = config.galpones.find((g) => g.id === id);
   const [g, setG] = useState<Galpon>(() => original ? { ...original } : { id: uid(), nombre: `Galpón ${config.galpones.length + 1}`, aves: null, lote: '', lat: null, lng: null, activo: true });
   const [aves, setAves] = useState(original?.aves ? String(original.aves) : '');
+  const [machos, setMachos] = useState(original?.machos ? String(original.machos) : '');
+  // Un galpón nuevo parte sin tipo: hay que elegirlo, y con eso se adapta todo (tareas, curvas, indicadores).
+  const [rubro, setRubro] = useState<Rubro | null>(original ? rubroGalpon(original) : null);
   const [borrar, setBorrar] = useState(false);
   const [loteNuevo, setLoteNuevo] = useState(false);
   const [ubicando, setUbicando] = useState(false);
@@ -761,29 +765,68 @@ function EditorGalpon({ id }: { id: string }) {
   };
 
   const enviar = async () => {
-    const limpio: Galpon = { ...g, nombre: g.nombre.trim(), lote: g.lote.trim(), aves: aNumero(aves) };
+    if (!rubro) return avisar('Elige qué aves tiene el galpón', 'mal');
+    const limpio: Galpon = {
+      ...g,
+      nombre: g.nombre.trim(),
+      lote: g.lote.trim(),
+      aves: aNumero(aves),
+      rubro,
+      tipo: rubro === 'engorda' ? 'produccion' : (g.tipo ?? 'produccion'),
+      machos: rubro === 'reproductora' ? aNumero(machos) : null,
+      // La línea tiene que calzar con el tipo de aves.
+      linea: g.linea && (rubroDe(g.linea) === rubro || (rubro === 'postura' && !LINEAS_BROILER.some((l) => l.id === g.linea))) ? g.linea : null,
+    };
     if (limpio.nombre.length < 1) return avisar('Ponle un nombre al galpón', 'mal');
     if (config.galpones.some((x) => x.id !== limpio.id && x.nombre.toLowerCase() === limpio.nombre.toLowerCase())) return avisar('Ya hay un galpón con ese nombre', 'mal');
+    if (nuevo && limpio.activo && !limpio.aves) return avisar(rubro === 'reproductora' ? 'Anota las hembras alojadas' : 'Anota las aves alojadas', 'mal');
+    if (nuevo && limpio.activo && !limpio.nacimiento) return avisar(rubro === 'engorda' ? 'Anota la fecha de recepción del pollito' : 'Anota la fecha de nacimiento del lote', 'mal');
+    let agregadas: string[] = [];
     const ok = await guardar((c) => {
       const i = c.galpones.findIndex((x) => x.id === limpio.id);
       // Se anota desde cuándo está en producción y sus descansos: esos días no aparecen como sin registrar.
       const conHistoria = anotarPausa(limpio, i >= 0 ? c.galpones[i] : undefined, fechaLocal(ahora()));
       if (i >= 0) c.galpones[i] = conHistoria;
       else c.galpones.push(conHistoria);
+      agregadas = asegurarTareas(c, rubro, fechaLocal(ahora()));
     }, nuevo ? 'Galpón agregado' : 'Galpón guardado');
+    if (ok && agregadas.length) avisar(`Listo. Se agregaron las tareas: ${agregadas.join(', ')}`, 'ok');
     if (ok) volver();
   };
+
 
   return (
     <div className="pantalla">
       <Barra titulo={nuevo ? 'Galpón nuevo' : g.nombre} />
       <div className="contenido">
+        <div className="tarjeta pila tipo-galpon">
+          <p className="fuerte">¿Qué aves tiene este galpón?</p>
+          <div className="opciones-grandes" role="radiogroup" aria-label="Tipo de aves">
+            {(['postura', 'reproductora', 'engorda'] as Rubro[]).map((r) => (
+              <button key={r} type="button" role="radio" aria-checked={rubro === r} className="opcion-grande" onClick={() => (setRubro(r), set({ linea: rubroDe(g.linea) === r && g.linea ? g.linea : null }))}>
+                <b>{NOMBRE_RUBRO[r]}</b>
+                <span className="chico suave">{r === 'postura' ? 'Huevo comercial' : r === 'reproductora' ? 'Huevo fértil para incubar' : 'Pollo broiler hasta el retiro'}</span>
+              </button>
+            ))}
+          </div>
+          {rubro && rubro !== 'engorda' && (
+            <div className="segmentos" role="group" aria-label="Etapa">
+              <button type="button" aria-pressed={(g.tipo ?? 'produccion') === 'recria'} onClick={() => set({ tipo: 'recria' })}>
+                Recría
+              </button>
+              <button type="button" aria-pressed={(g.tipo ?? 'produccion') === 'produccion'} onClick={() => set({ tipo: 'produccion' })}>
+                {rubro === 'reproductora' ? 'Producción (postura)' : 'Producción'}
+              </button>
+            </div>
+          )}
+          {rubro && <p className="chico suave">Con esto la app le pide al operario solo las tareas que corresponden y compara con la guía de la línea.</p>}
+        </div>
         <label className="campo">
           <span>Nombre</span>
           <input className="entrada" value={g.nombre} onChange={(e) => set({ nombre: e.target.value })} maxLength={30} />
         </label>
         <label className="campo">
-          <span>Aves alojadas hoy</span>
+          <span>{rubro === 'reproductora' ? 'Hembras alojadas hoy' : rubro === 'engorda' ? 'Pollos recibidos o alojados hoy' : 'Aves alojadas hoy'}</span>
           <input className="entrada" inputMode="numeric" value={aves} onChange={(e) => setAves(e.target.value.replace(/[^\d.]/g, ''))} placeholder="Por ejemplo: 12000" />
           <small>Con este número se calculan el consumo por ave, el porcentaje de postura y la mortalidad mientras el operario no anote las aves vivas. Desde que las anota en la tarea Mortalidad, se usan las anotadas.</small>
         </label>
@@ -791,7 +834,14 @@ function EditorGalpon({ id }: { id: string }) {
           <span>Lote (opcional)</span>
           <input className="entrada" value={g.lote} onChange={(e) => set({ lote: e.target.value })} maxLength={30} placeholder="Por ejemplo: 24-A, Lohmann Brown" />
         </label>
+        {rubro === 'reproductora' && (
+          <label className="campo">
+            <span>Machos alojados hoy</span>
+            <input className="entrada" inputMode="numeric" value={machos} onChange={(e) => setMachos(e.target.value.replace(/[^\d.]/g, ''))} placeholder="Por ejemplo: 1000" />
+          </label>
+        )}
         <CamposGenetica
+          rubro={rubro}
           linea={g.linea ?? ''}
           nacimiento={g.nacimiento ?? ''}
           hoy={fechaLocal(ahora())}

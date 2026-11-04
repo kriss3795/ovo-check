@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Download } from 'lucide-react';
 import { asegurarPeriodo, traerPeriodo } from '../lib/app';
 import { avisar, ir, useEstado } from '../lib/estado';
-import { edadSemanas, estandarDe, nombreLinea, rubroDe } from '../lib/estandar';
+import { edadSemanas, estandarDe, nombreLinea, rubroGalpon } from '../lib/estandar';
 import { HOJAS, armarExcel } from '../lib/excel';
 import { entregarArchivo } from '../lib/exportar';
 import { diaGalpon } from '../lib/indicadores';
@@ -118,7 +118,7 @@ export function Planilla() {
         const edad = edadSemanas(g, f);
         const std = g.linea && edad != null ? estandarDe(g.linea, edad) : null;
         out.push({
-          clave: `${g.id}-${f}`, fecha: f, hasta: f, galponId: g.id, galpon: g.nombre, lote: g.lote, enDias: rubroDe(g.linea) === 'engorda', semana: edad != null ? (rubroDe(g.linea) === 'engorda' ? Math.round(edad * 7) : Math.floor(edad) + 1) : null,
+          clave: `${g.id}-${f}`, fecha: f, hasta: f, galponId: g.id, galpon: g.nombre, lote: g.lote, enDias: rubroGalpon(g) === 'engorda', semana: edad != null ? (rubroGalpon(g) === 'engorda' ? Math.round(edad * 7) : Math.floor(edad) + 1) : null,
           aves: d.aves, muertas: d.muertas, mort: d.mortalidad, mortAcum: avesIni ? (acum * 100) / avesIni : null, huevos: d.huevos, postura: d.postura,
           guia: std?.postura ?? null, dif: d.postura != null && std?.postura != null ? d.postura - std.postura : null, aguaL: d.aguaL, ml: d.mlAve,
           alimKg: d.alimKg, g: d.gAve, guiaG: std?.alimento ?? null, rel: d.relacion, tmin: d.tmin, tmax: d.tmax, alertas: contarAlertas(indice, g.id, f, f),
