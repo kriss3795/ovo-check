@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Camera, Check, ChevronRight, CircleCheck, Clock, LogOut, Minus, Plus, TriangleAlert, Ban, Keyboard,
+  Camera, Check, ChevronRight, CircleCheck, Clock, LogOut, Minus, Plus, TriangleAlert, Ban, Keyboard, MapPinOff,
 } from 'lucide-react';
-import { abrirVisita, ahora, guardarRegistro, salir, visitaVigente, type FotoNueva } from '../lib/app';
+import { abrirVisita, ahora, guardarRegistro, salir, ubicar, visitaVigente, type FotoNueva } from '../lib/app';
 import { avisar, cerrarPantalla, ir, leerEstado, useEstado, volver } from '../lib/estado';
 import {
   HORA_INICIO_TARDE, Indice, reiniciosDe, LIMITE_BLOQUE, NOMBRE_BLOQUE, avanceGalpon, avesPara, avisosLogicos, conjuntoRevisadas, cuadreAves, evaluarCampo, resumen, tareasDe,
@@ -212,6 +212,23 @@ export function OpGalpon({ id }: { id: string }) {
         derecha={<Envio />}
       />
       <div className="contenido">
+        {visitas[id]?.gpsError && visitas[id]?.lat == null && (
+          <div className="tarjeta aviso-atencion linea-h" role="alert">
+            <MapPinOff size={26} aria-hidden style={{ flex: 'none' }} />
+            <div className="crece">
+              <p className="fuerte">Activa la ubicación del teléfono</p>
+              <p className="chico">
+                {visitas[id]!.gpsError === 'sin_permiso'
+                  ? 'Ovo Check no tiene permiso para usar la ubicación. Actívalo en los ajustes del teléfono.'
+                  : 'La ubicación del teléfono está apagada. Actívala desde el menú de arriba de la pantalla.'}{' '}
+                Cada registro debe llevar dónde se hizo.
+              </p>
+            </div>
+            <button className="boton chico" onClick={() => ubicar(id)}>
+              Ya la activé
+            </button>
+          </div>
+        )}
         <div className="linea-h">
           <Huevo fraccion={tareas.length ? hechas / tareas.length : 0} size={46} />
           <div>
@@ -335,6 +352,7 @@ function banderasPresencia(galpon: Galpon | undefined, galponId: string): { flag
   if (galpon?.lat != null && galpon.lng != null && v?.lat != null && v.lng != null) {
     if (distancia(galpon.lat, galpon.lng, v.lat, v.lng) > 300 + (v.precision ?? 0)) flags.push('lejos');
   }
+  if (v?.lat == null && v?.gpsError) flags.push('gps_apagado');
   return { flags, lat: v?.lat ?? null, lng: v?.lng ?? null, precision: v?.precision ?? null };
 }
 
@@ -895,7 +913,7 @@ export function Problema(p: { galpon?: string }) {
     guardando.current = true;
     const pres = banderasPresencia(galpon, galponId ?? '');
     const texto = [...frases, nota.trim()].filter(Boolean).join('. ');
-    const flags: Flag[] = ['problema', ...pres.flags.filter((f) => f === 'lejos')];
+    const flags: Flag[] = ['problema', ...pres.flags.filter((f) => f === 'lejos' || f === 'gps_apagado')];
     if (!foto) flags.push('sin_foto');
     await guardarRegistro(
       {

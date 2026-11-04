@@ -8,20 +8,15 @@ Es una sola app con dos formas de entrar: **operario** o **supervisor**. Se publ
 
 ## Instalación (una sola vez)
 
-Necesitas tres cuentas gratuitas: Supabase (guarda los datos), Vercel (publica la app) y el Gmail `ovocheck.avisos@gmail.com` (envía los códigos para recuperar claves).
+Necesitas tres cuentas gratuitas: Vercel (publica la app), la base de datos Neon que se crea desde Vercel (guarda los datos y las fotos) y el Gmail `ovocheck.avisos@gmail.com` (envía los códigos para recuperar claves).
 
-### 1. Supabase: crear el servidor
+### 1. La base de datos (se crea desde Vercel)
 
-1. En supabase.com abre tu proyecto y entra a **SQL Editor**.
-2. Pega el contenido completo de `supabase/esquema.sql` y presiona **Run**. Si aparece una advertencia, confirma. Abajo debe decir *Ovo Check instalado*.
-3. En **Project Settings > API Keys** vas a necesitar tres datos para el paso 3:
-   - la dirección del proyecto (`https://xxxx.supabase.co`),
-   - la clave pública: la *publishable* (empieza con `sb_publishable_`),
-   - la clave secreta: la *secret* (empieza con `sb_secret_`). Esta no se comparte con nadie.
+1. En vercel.com abre el proyecto y entra a **Storage > Create Database > Neon (Serverless Postgres)**.
+2. Elige el plan **Free**, la región São Paulo y conéctala al proyecto (Production y Preview). Vercel agrega sola la variable `DATABASE_URL`.
+3. Listo. No hay que pegar nada: cada vez que Vercel publica una versión, la app instala o actualiza sus tablas en la base (`scripts/instalar.mjs`), sin borrar datos.
 
-   Si la página no las muestra todavía, se crean ahí mismo con un botón. Las antiguas *anon* y *service_role* (empiezan con `eyJ`) también sirven, pero Supabase anunció que las retira a fines de 2026.
-
-No hay que cambiar ni anotar nada del archivo. Se puede volver a ejecutar completo cuando haya una versión nueva, sin perder datos.
+La base gratuita de Neon nunca se pausa ni se borra por falta de uso: se duerme sola cuando nadie la usa y despierta en un segundo.
 
 ### 2. Gmail: permitir que la app envíe los códigos
 
@@ -32,13 +27,10 @@ No hay que cambiar ni anotar nada del archivo. Se puede volver a ejecutar comple
 
 1. Sube esta carpeta a un repositorio de GitHub (sin `node_modules`): en github.com, **New repository**, y luego **uploading an existing file**, arrastrando todo el contenido de la carpeta.
 2. En vercel.com, **Add New > Project**, elige ese repositorio. Vercel reconoce solo que es un proyecto Vite.
-3. Antes de presionar Deploy, abre **Environment Variables** y agrega estas siete:
+3. Antes de presionar Deploy, abre **Environment Variables** y agrega estas cuatro (la de la base la agrega Vercel en el paso 1):
 
    | Nombre | Valor |
    |---|---|
-   | `VITE_SUPABASE_URL` | la dirección del proyecto de Supabase |
-   | `VITE_SUPABASE_KEY` | la clave pública de Supabase |
-   | `SUPABASE_SERVICE_KEY` | la clave secreta de Supabase |
    | `GMAIL_USER` | `ovocheck.avisos@gmail.com` |
    | `GMAIL_APP_PASSWORD` | las 16 letras de la contraseña de aplicación |
    | `VAPID_PUBLIC_KEY` | la clave pública de notificaciones |
@@ -151,7 +143,7 @@ Las fotos se borran solas de la nube a los **30 días**. Los números y el histo
 - En cada registro, al abrir una foto: **Guardar en este equipo**.
 - La app avisa en la pantalla de inicio del supervisor cuando hay fotos que se borran esa semana, y los lunes le llega una notificación.
 
-El plazo se cambia en Supabase: `update oc_ajustes set valor = '45' where clave = 'dias_fotos';`
+El plazo se cambia en la base (Vercel > Storage > la base > Open in Neon > SQL Editor): `update oc_ajustes set valor = '45' where clave = 'dias_fotos';`
 
 ---
 
@@ -232,52 +224,56 @@ Límite conocido: el PIN del operario es de 4 números y se comprueba en el tel�
 
 La medida que importa es el **galpón en producción**, no el plantel. Con la rutina clásica, cada galpón genera al día unos 10 registros (12 KB) y unas 4 fotos (130 KB cada una, que se borran a los 30 días).
 
-| Recurso de Supabase gratis | Lo que ocupa un galpón | Alcanza para |
-|---|---|---|
-| 1 GB para fotos | 16 MB, estable (las fotos rotan cada 30 días) | **unos 60 galpones al mismo tiempo** |
-| 500 MB para los números | 4,3 MB por año, y se acumula | 60 galpones durante 1 año y medio; 30 galpones durante 3 años |
+La base gratuita de Neon tiene **1 GB** para todo: números y fotos.
 
-En planteles: **entre 12 y 15 avícolas de 4 galpones**, o 30 avícolas chicas de 2 galpones. Lo primero que se acaba es el espacio de fotos.
+| Uso | Lo que ocupa un galpón | Tope que se pone la app |
+|---|---|---|
+| Fotos | 16 MB, estable (las fotos rotan cada 30 días) | 550 MB: unos 30 galpones al mismo tiempo |
+| Números | 4,3 MB por año, y se acumula | el resto, hasta 900 MB en total |
+
+Para una avícola de 10 galpones: unos 160 MB de fotos y 45 MB de números al año, o sea, **muchos años** antes de llenarse. La app muestra el espacio usado en Ajustes.
 
 ### Qué pasa si se llena, y cómo se protege sola
 
-Si la base de datos gratuita de Supabase se pasa de su límite, Supabase la deja en modo solo lectura y nadie puede ni entrar. Para que eso no ocurra nunca, la app se mide a sí misma y frena antes, por etapas:
+Si la base gratuita llega a su límite, Neon deja de aceptar datos nuevos (no borra nada). Para que eso no ocurra nunca, la app se mide a sí misma y frena antes, por etapas:
 
-1. **Cupo por galpones.** Un plantel nuevo solo se acepta si sus galpones caben junto a los que ya están trabajando (tope: 60 galpones en producción). A quien no cabe, la app le dice que por ahora no quedan cupos.
-2. **Pocos por día.** Se aceptan como máximo 8 planteles nuevos al día en todo el servidor, por si la app se hace conocida de golpe.
-3. **Al 70 % del espacio** (de números o de fotos) se dejan de aceptar planteles nuevos. Los que ya existen siguen igual.
-4. **Si se acaba el espacio de fotos,** los números siguen llegando y las fotos esperan en cada teléfono hasta que se libere espacio (todos los días se borran las que cumplen 30 días). Un solo plantel no puede ocupar más de 300 MB ni más de 3.000 fotos.
-5. **Si se acaba el espacio de números** (450 MB, antes del límite real de 500), los registros nuevos esperan en cada teléfono, sin perderse, y se envían solos cuando hay espacio. Entrar, revisar y descargar siguen funcionando. Operarios y supervisores ven el aviso "El servidor está lleno".
-6. **Contra el abuso:** un plantel no puede enviar más de 2.500 registros en 24 horas ni registros inflados, y un plantel creado para probar que quedó abandonado se borra solo. Eso ocurre únicamente si nunca registró nada y nadie lo abrió en 180 días (ajuste `dias_abandono`). Un plantel con registros no se borra nunca por su cuenta, aunque sus galpones pasen meses en vacío sanitario. Antes de eliminar uno abandonado se le avisa por correo a sus supervisores con 30 días de anticipación.
+1. **Cupo por galpones.** Un plantel nuevo solo se acepta si sus galpones caben junto a los que ya están trabajando. A quien no cabe, la app le dice que por ahora no quedan cupos.
+2. **Pocos por día.** Se aceptan como máximo 8 planteles nuevos al día en todo el servidor.
+3. **Al 70 % del espacio** se dejan de aceptar planteles nuevos. Los que ya existen siguen igual.
+4. **Si se acaba el espacio de fotos,** los números siguen llegando y las fotos esperan en cada teléfono hasta que se libere espacio (todos los días se borran las que cumplen 30 días). Un solo plantel no puede ocupar más de 250 MB ni más de 3.000 fotos.
+5. **Si la base llega a 900 MB** (antes del límite real de 1 GB), los registros nuevos esperan en cada teléfono, sin perderse, y se envían solos cuando hay espacio. Entrar, revisar y descargar siguen funcionando. Operarios y supervisores ven el aviso "El servidor está lleno".
+6. **Contra el abuso:** un plantel no puede enviar más de 2.500 registros en 24 horas ni registros inflados, y un plantel creado para probar que quedó abandonado se borra solo. Eso ocurre únicamente si nunca registró nada y nadie lo abrió en 180 días (ajuste `dias_abandono`). Un plantel con registros no se borra nunca por su cuenta. Antes de eliminar uno abandonado se le avisa por correo a sus supervisores con 30 días de anticipación.
 
 **Aviso por correo.** La tarea diaria mide el espacio y envía un correo a la cuenta de Gmail de la app cuando el uso pasa el 60 %, el 80 % y el 95 %, con el detalle y qué hacer. Para recibirlo además en otro correo, agrega en Vercel la variable `CORREO_DUENO` con esa dirección.
+
+**Si un día se llena,** hay tres salidas y en ninguna se pierde nada: descargar el respaldo y archivar los años antiguos, pasar la base al plan pagado de Neon (se cobra por uso, desde unos pocos dólares al mes), o crear una segunda base gratuita para otro grupo de planteles.
 
 ### Si se hace conocida y llega mucha gente
 
 - La app en sí (Vercel) aguanta sin problema: son archivos que se sirven desde una red mundial.
 - El servidor gratuito no se cae ni se corrompe: los cupos de arriba hacen que los primeros planteles sigan trabajando normal y los que llegan después reciban un "por ahora no quedan cupos".
-- Para abrir más cupos se pasa el proyecto de Supabase al plan **Pro (25 dólares al mes)**: 100 GB de fotos y 8 GB de números, con respaldo diario. No hay que mover nada ni reinstalar. Después se ejecuta una línea en el SQL Editor para que la app use el espacio nuevo:
+- Para abrir más cupos se pasa la base de Neon al plan pagado. No hay que mover nada ni reinstalar. Después se ejecuta una línea en el SQL Editor de Neon para que la app use el espacio nuevo:
 
   ```sql
   select oc_soporte_plan('pro');
   ```
 
-  Con eso caben unos **1.500 galpones** (300 a 400 avícolas).
 
 ### Otros límites
 
 | Servicio | Qué da gratis | Qué pasa al llegar al límite |
 |---|---|---|
 | Vercel | Publicación de la app, las funciones y las tareas diarias | Ver la nota de abajo |
+| Neon | 1 GB, 100 horas de cálculo al mes (la base se duerme sola cuando nadie la usa) y 5 GB de tráfico al mes | Si se acaban las horas o el tráfico, la base se detiene hasta el mes siguiente; los registros esperan en los teléfonos. Las fotos ya vistas las entrega la red de Vercel, no la base |
 | Gmail | 500 correos al día | Sobra para recuperar claves |
 | Notificaciones | Sin costo ni límite práctico | |
 
-- Los topes viven en la tabla `oc_ajustes` de Supabase (`max_galpones`, `max_granjas`, `max_granjas_dia`, `max_mb_datos`, `max_mb_total`, `max_mb_fotos_granja`, `max_fotos_granja`, `max_registros_dia`, `dias_fotos`).
+- Los topes viven en la tabla `oc_ajustes` de la base (`max_galpones`, `max_granjas`, `max_granjas_dia`, `max_mb_datos`, `max_mb_total`, `max_mb_fotos_granja`, `max_fotos_granja`, `max_registros_dia`, `dias_fotos`).
 - Un plantel de prueba se borra en Ajustes > Plantel > Eliminar este plantel.
-- Supabase pausa los proyectos gratuitos tras 7 días sin uso. La tarea diaria de Vercel lo mantiene despierto.
-- El plan gratuito de Supabase no hace copias de respaldo. Por eso la app le recuerda al supervisor descargar el respaldo cada día y guardarlo fuera del teléfono.
+- Una tarea de GitHub ("Despertador") revisa la app dos veces al día; si algo falla, GitHub te avisa por correo.
+- La base gratuita solo permite volver atrás hasta 6 horas. Por eso la app le recuerda al supervisor descargar el respaldo cada día y guardarlo fuera del teléfono.
 
-**Nota sobre Vercel:** su plan gratuito está pensado para uso personal o no comercial. Para probar y mostrar la app sirve; si después la vendes a empresas, corresponde pasar al plan Pro (20 dólares al mes) o mover la publicación a otro servicio. Los datos no se ven afectados porque viven en Supabase.
+**Nota sobre Vercel:** su plan gratuito está pensado para uso personal o no comercial. Para probar y mostrar la app sirve; si después la vendes a empresas, corresponde pasar al plan Pro (20 dólares al mes) o mover la publicación a otro servicio. Los datos no se ven afectados porque viven en la base de Neon.
 
 ---
 
@@ -293,8 +289,8 @@ Si la base de datos gratuita de Supabase se pasa de su límite, Supabase la deja
 
 ## Soporte
 
-- Ver el uso de cada plantel, en el SQL Editor de Supabase: `select * from oc_soporte_uso;`
+- Ver el uso de cada plantel, en el SQL Editor de Neon (Vercel > Storage > la base > Open in Neon): `select * from oc_soporte_uso;`
 - Borrar un plantel completo desde ahí (por ejemplo, uno creado para abusar del espacio): `select oc_soporte_eliminar('Nombre del plantel');`
-- Después de contratar el plan Pro de Supabase: `select oc_soporte_plan('pro');`
+- Después de pasar la base al plan pagado: `select oc_soporte_plan('pro');`
 - Si un supervisor único perdió su clave y ya no tiene acceso a su correo: `select oc_soporte_clave('Nombre del plantel', 'Nombre Apellido', 'claveTemporal');`
 - Para regenerar los íconos a partir de otro logo: reemplaza `recursos/logo-original.png` y ejecuta `python3 recursos/generar_iconos.py`.

@@ -1,14 +1,13 @@
 // Envía por correo el código para recuperar la clave de un supervisor.
 // Funciona como "Serverless Function" de Vercel. Variables de entorno necesarias (en Vercel):
-//   VITE_SUPABASE_URL      dirección del proyecto de Supabase
-//   SUPABASE_SERVICE_KEY   clave secreta de Supabase (service_role). Nunca va en el teléfono.
+//   DATABASE_URL           base de datos (la crea Vercel > Storage > Neon)
 //   GMAIL_USER             cuenta de Gmail que envía los correos
 //   GMAIL_APP_PASSWORD     "contraseña de aplicación" de esa cuenta (16 letras)
 import { USUARIO, correoListo, escapar, transporte } from './_correo.js';
 
+import { dbLista, llamar } from './_db.js';
+
 const limpio = (v) => String(v ?? '').trim();
-const URL_BASE = limpio(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL).replace(/\/+$/, '');
-const SERVICIO = limpio(process.env.SUPABASE_SERVICE_KEY);
 
 const ocultar = (correo) => {
   const [a, b] = correo.split('@');
@@ -22,12 +21,12 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') return res.status(204).end();
 
-  const servidorListo = Boolean(URL_BASE && SERVICIO);
+  const servidorListo = dbLista;
 
   // Diagnóstico: ¿está configurado el envío? Con ?probar=1 además se conecta a Gmail para comprobar la clave.
   if (req.method === 'GET') {
     const estado = { servidor: servidorListo, correo: correoListo, ok: servidorListo && correoListo, detalle: '' };
-    if (!servidorListo) estado.detalle = 'Falta la variable SUPABASE_SERVICE_KEY en Vercel';
+    if (!servidorListo) estado.detalle = 'Falta conectar la base de datos en Vercel > Storage';
     else if (!correoListo) estado.detalle = 'Faltan las variables GMAIL_USER y GMAIL_APP_PASSWORD en Vercel';
     else if (String(req.query?.probar ?? '') === '1') {
       try {
@@ -61,18 +60,10 @@ export default async function handler(req, res) {
 
   let datos;
   try {
-    const r = await fetch(`${URL_BASE}/rest/v1/rpc/oc_recuperacion_pedir`, {
-      method: 'POST',
-      headers: { ...(SERVICIO.startsWith('eyJ') ? { apikey: SERVICIO, Authorization: `Bearer ${SERVICIO}` } : { apikey: SERVICIO }), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ p: pedido }),
-    });
-    datos = await r.json();
-    if (!r.ok) {
-      const msg = String(datos?.message ?? '');
-      return res.status(400).json({ error: msg.startsWith('OC_') ? msg : 'SERVIDOR' });
-    }
-  } catch {
-    return res.status(502).json({ error: 'SERVIDOR' });
+    datos = await llamar('oc_recuperacion_pedir', pedido, {});
+  } catch (e) {
+    const c = String(e?.codigo ?? '');
+    return res.status(c.startsWith('OC_') ? 400 : 502).json({ error: c.startsWith('OC_') ? c : 'SERVIDOR' });
   }
   if (datos?.error) return res.status(400).json({ error: datos.error });
 

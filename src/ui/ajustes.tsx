@@ -1,10 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   ArrowDown, ArrowUp, Bell, Check, ChevronRight, ClipboardList, Database, Images, KeyRound, LogOut, MapPin, Plus,
-  RotateCcw, Send, Settings2, Smartphone, Trash2, TriangleAlert, Users, Warehouse, Wifi, X,
+  Printer, QrCode, RefreshCw, RotateCcw, ScanLine, Send, Settings2, Smartphone, Monitor, Trash2, TriangleAlert, Users, Warehouse, Wifi, X,
 } from 'lucide-react';
-import { administrar, ahora, diagnostico, guardarConfig, salir } from '../lib/app';
-import { avisar, ir, useEstado, volver } from '../lib/estado';
+import { administrar, ahora, diagnostico, guardarConfig, invitacionQR, salir } from '../lib/app';
+import { createPortal } from 'react-dom';
+import { CodigoQR, EscanerQR, codigoLegible, enlaceUnirse, leerQR } from './qr';
+import { avisar, ir, poner, useEstado, volver } from '../lib/estado';
 import { anotarPausa, cargaDiaria, limitesDe, limitesSugeridos, LOGICA_DEFECTO, logicaDe, NOMBRE_BLOQUE, unidadResultado } from '../lib/logica';
 import { mensajeError } from '../lib/nube';
 import { BIBLIOTECA, GRUPOS_TAREAS, RUTINA_CLASICA, campoAvesVivas, campoVacio, tareaDesde, tareaVacia } from '../lib/plantillas';
@@ -50,6 +52,7 @@ export function Ajustes() {
   const [bajarFotos, setBajarFotos] = useState(false);
   const fotosNube = useEstado((e) => e.fotosNube);
   const [confirmarSalir, setConfirmarSalir] = useState(false);
+  const [escanear, setEscanear] = useState(false);
   const avisos = useEstado((e) => e.avisos);
   const operarios = config.usuarios.filter((u) => u.rol === 'operario' && u.estado !== 'baja').length;
   const fila = (icono: ReactNode, titulo: string, detalle: string, accion: () => void) => (
@@ -79,7 +82,9 @@ export function Ajustes() {
       </div>
       <p className="seccion">Teléfonos</p>
       <div className="lista">
-        {fila(<Smartphone size={24} />, 'Teléfonos y clave del plantel', `${dispositivos.length || 1} ${dispositivos.length > 1 ? 'equipos en el plantel' : 'equipo en el plantel'}`, () => ir({ p: 'ajuste', cual: 'telefonos' }))}
+        {fila(<QrCode size={24} />, 'Sumar un teléfono', 'Muestra el QR del plantel al operario', () => ir({ p: 'ajuste', cual: 'telefonos' }))}
+        {fila(<Monitor size={24} />, 'Entrar en un computador', 'Escanea el código que muestra el computador', () => setEscanear(true))}
+        {fila(<Smartphone size={24} />, 'Equipos y clave del plantel', `${dispositivos.length || 1} ${dispositivos.length > 1 ? 'equipos en el plantel' : 'equipo en el plantel'}`, () => ir({ p: 'ajuste', cual: 'telefonos' }))}
       </div>
       <p className="seccion">Datos y cuenta</p>
       <div className="lista">
@@ -94,6 +99,18 @@ export function Ajustes() {
       <button className="boton" onClick={() => setConfirmarSalir(true)}>
         <LogOut size={22} aria-hidden /> Cerrar sesión
       </button>
+      {escanear && (
+        <EscanerQR
+          ayuda="Apunta al código que muestra el computador"
+          cerrar={() => setEscanear(false)}
+          alLeer={(t) => {
+            setEscanear(false);
+            const q = leerQR(t);
+            if (q?.tipo === 'aprobar') poner({ qrAprobar: q.codigo });
+            else avisar('Ese código no es el de entrada de Ovo Check. En el computador, toca "Soy supervisor".', 'mal');
+          }}
+        />
+      )}
       {exportar && <HojaExportar cerrar={() => setExportar(false)} />}
       {bajarFotos && <HojaFotos cerrar={() => setBajarFotos(false)} />}
       {confirmarSalir && <Confirmar titulo="¿Cerrar la sesión de supervisor?" texto="Para volver a entrar necesitarás tu clave." accion="Cerrar sesión" alConfirmar={() => salir(true)} cerrar={() => setConfirmarSalir(false)} />}
@@ -1276,7 +1293,10 @@ function Telefonos() {
     <div className="pantalla">
       <Barra titulo="Teléfonos" sub="Sumar y quitar equipos del plantel" />
       <div className="contenido">
-        <section className="tarjeta pila">
+        <QrPlantel nombre={config.granja.nombre} />
+        <details className="tarjeta plegable">
+          <summary>Sin QR: con el nombre y la clave del plantel</summary>
+          <div className="pila" style={{ marginTop: 12 }}>
           <p className="fuerte">Para que un operario entre desde su teléfono</p>
           <ol className="pasos-lista">
             <li>
@@ -1300,7 +1320,8 @@ function Telefonos() {
             </button>
           </div>
           <p className="chico suave">La invitación lleva el enlace y el nombre del plantel, no la clave: esa dásela tú. Se escribe una sola vez en cada teléfono.</p>
-        </section>
+          </div>
+        </details>
         <p className="seccion">Equipos en el plantel</p>
         <div className="lista">
           {dispositivos.length === 0 && <div className="fila suave">Se cargan al conectarse con el servidor.</div>}
@@ -1372,6 +1393,105 @@ function Telefonos() {
       )}
       {cambiar && <HojaClavePlantel actual={clave ?? ''} cerrar={() => setCambiar(false)} />}
     </div>
+  );
+}
+
+/** El QR del plantel: el operario lo escanea con la cámara de su teléfono y queda dentro, sin escribir nada. */
+function QrPlantel({ nombre }: { nombre: string }) {
+  const [inv, setInv] = useState<{ codigo: string; vence: string; usos: number } | null>(null);
+  const [error, setError] = useState('');
+  const [cambiar, setCambiar] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
+  const [imprimir, setImprimir] = useState(false);
+  const traer = async (nueva = false) => {
+    setOcupado(true);
+    setError('');
+    try {
+      setInv(await invitacionQR(nueva));
+      if (nueva) avisar('QR nuevo listo. El anterior ya no sirve.', 'ok');
+    } catch (e) {
+      setError(mensajeError(e));
+    } finally {
+      setOcupado(false);
+      setCambiar(false);
+    }
+  };
+  useEffect(() => {
+    traer();
+  }, []);
+  useEffect(() => {
+    if (!imprimir) return;
+    const fin = () => setImprimir(false);
+    document.body.classList.add('imprimiendo');
+    window.addEventListener('afterprint', fin);
+    const t = window.setTimeout(() => window.print(), 50);
+    return () => {
+      clearTimeout(t);
+      document.body.classList.remove('imprimiendo');
+      window.removeEventListener('afterprint', fin);
+    };
+  }, [imprimir]);
+  const enviar = async () => {
+    if (!inv) return;
+    const texto = `Para registrar tus tareas de ${nombre} en Ovo Check, abre este enlace en tu teléfono:\n${enlaceUnirse(inv.codigo)}`;
+    try {
+      if (navigator.share) await navigator.share({ text: texto });
+      else window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank', 'noopener');
+    } catch {
+      /* la persona cerró el menú de compartir */
+    }
+  };
+  return (
+    <section className="tarjeta qr-plantel">
+      <div className="qr-plantel-codigo">
+        {inv ? <CodigoQR texto={enlaceUnirse(inv.codigo)} tam={208} titulo={`QR para entrar a ${nombre}`} /> : <div className="qr-espera">{error || 'Cargando…'}</div>}
+      </div>
+      <div className="qr-plantel-texto">
+        <p className="fuerte">Muéstrale este código al operario</p>
+        <p className="chico">
+          Lo escanea con la cámara de su teléfono (o en Ovo Check, <b>Soy operario &gt; Escanear</b>) y queda en el plantel. Después elige su nombre y crea su PIN.
+        </p>
+        {inv && (
+          <p className="chico suave">
+            Código {codigoLegible(inv.codigo)}. Sirve hasta el {fechaLarga(inv.vence.slice(0, 10)).toLowerCase()}
+            {inv.usos > 0 ? `; se ha usado ${inv.usos} ${inv.usos === 1 ? 'vez' : 'veces'}` : ''}.
+          </p>
+        )}
+        {error && inv && <p className="error-texto">{error}</p>}
+        <div className="linea-h envolver">
+          <button className="boton primario" onClick={enviar} disabled={!inv}>
+            <Send size={20} aria-hidden /> Enviar enlace
+          </button>
+          <button className="boton" onClick={() => setImprimir(true)} disabled={!inv}>
+            <Printer size={20} aria-hidden /> Imprimir
+          </button>
+          <button className="boton" onClick={() => setCambiar(true)} disabled={ocupado}>
+            <RefreshCw size={20} aria-hidden /> Cambiar el QR
+          </button>
+        </div>
+      </div>
+      {cambiar && (
+        <Confirmar
+          titulo="¿Cambiar el QR del plantel?"
+          texto="El código actual deja de servir de inmediato (también los impresos y los enlaces enviados). Los teléfonos que ya están en el plantel siguen funcionando."
+          accion="Cambiar el QR"
+          ocupado={ocupado}
+          cerrar={() => setCambiar(false)}
+          alConfirmar={() => traer(true)}
+        />
+      )}
+      {imprimir &&
+        inv &&
+        createPortal(
+          <div className="hoja-imprimir">
+            <h1>{nombre}</h1>
+            <CodigoQR texto={enlaceUnirse(inv.codigo)} tam={420} titulo="QR del plantel" />
+            <p>Escanea con la cámara de tu teléfono para registrar en Ovo Check.</p>
+            <p className="hoja-imprimir-codigo">{codigoLegible(inv.codigo)}</p>
+          </div>,
+          document.body,
+        )}
+    </section>
   );
 }
 

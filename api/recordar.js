@@ -8,7 +8,7 @@ const NOMBRE = { manana: 'de la mañana', tarde: 'de la tarde' };
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (!cronAutorizado(req)) return res.status(401).json({ error: 'No autorizado' });
-  if (!servidorListo || !avisosListos) return res.status(503).json({ error: 'Faltan variables en Vercel (SUPABASE_SERVICE_KEY, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY)' });
+  if (!servidorListo || !avisosListos) return res.status(503).json({ error: 'Faltan la base de datos o las variables VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY en Vercel' });
   const bloque = req.query?.bloque === 'tarde' ? 'tarde' : 'manana';
   try {
     // De paso se avisan los problemas que hayan quedado sin notificar.

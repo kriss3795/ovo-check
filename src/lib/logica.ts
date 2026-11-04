@@ -1,5 +1,6 @@
 // Reglas del día a día: qué tareas tocan, qué está hecho y qué se marca para el supervisor.
 import type { Campo, Config, Flag, Galpon, Logica, Pausa, Registro, RegistroLocal, Revision, Tarea } from './tipos';
+import { tareaParaGalpon } from './modulos';
 import { BIBLIOTECA, RUTINA_CLASICA } from './plantillas';
 import { diaSemana, diasEntre, fechaCorta, fechaLocal, fechaRelativa, num } from './util';
 
@@ -7,7 +8,7 @@ import { diaSemana, diasEntre, fechaCorta, fechaLocal, fechaRelativa, num } from
 export const LIMITE_BLOQUE = { manana: 13, tarde: 20 } as const;
 export const NOMBRE_BLOQUE = { manana: 'Mañana', tarde: 'Tarde' } as const;
 
-export const FLAGS_CRITICOS: Flag[] = ['problema', 'retrocede', 'no_calza', 'ilogico'];
+export const FLAGS_CRITICOS: Flag[] = ['problema', 'retrocede', 'no_calza', 'ilogico', 'gps_apagado'];
 export const FLAGS_CONFIANZA: Flag[] = ['lejos', 'sin_foto', 'omitida', 'temprano'];
 /** Antes de esta hora, una tarea de la tarde se considera registrada antes de tiempo. */
 export const HORA_INICIO_TARDE = 12;
@@ -18,6 +19,7 @@ export const NOMBRE_FLAG: Record<Flag | 'reloj', string> = {
   no_calza: 'Las aves vivas no calzan',
   ilogico: 'Fuera de los límites',
   lejos: 'Lejos del galpón',
+  gps_apagado: 'Ubicación apagada',
   sin_foto: 'Sin foto',
   omitida: 'No se hizo',
   temprano: 'Registrada antes de hora',
@@ -57,7 +59,9 @@ export function tareasDe(config: Config, galponId: string, fecha: string): Tarea
   const galpon = config.galpones.find((g) => g.id === galponId);
   if (galpon && !vigenteEn(galpon, fecha)) return [];
   const dia = diaSemana(fecha);
-  return config.tareas.filter((t) => vigenteEn(t, fecha) && t.dias.includes(dia) && (t.galpones === null || t.galpones.includes(galponId)));
+  return config.tareas.filter(
+    (t) => vigenteEn(t, fecha) && t.dias.includes(dia) && (t.galpones === null || t.galpones.includes(galponId)) && tareaParaGalpon(t.etapa, galpon),
+  );
 }
 
 /** Día de inicio del lote actual de cada galpón que lo tenga. */
@@ -72,6 +76,8 @@ export class Indice {
   private reemplazo = new Map<string, RegistroLocal>();
   private anulaciones = new Map<string, RegistroLocal>();
   problemas: RegistroLocal[] = [];
+  /** Registros de gestión vigentes (sala de proceso, bodega, despachos, insumos, sanidad, lotes), del más nuevo al más antiguo. */
+  gestion: RegistroLocal[] = [];
   /** Día en que empezó el lote actual de cada galpón: lo anterior no se usa para comparar con lo de ahora. */
   private reinicios: Record<string, string>;
 
@@ -90,6 +96,10 @@ export class Indice {
         if (!r.anulado) this.problemas.push(r);
         continue;
       }
+      if (r.tipo !== 'tarea') {
+        if (!r.anulado) this.gestion.push(r);
+        continue;
+      }
       const k = `${r.fecha}|${r.galpon_id}|${r.tarea_id}`;
       // Una anulación deja sin efecto solo al registro que anula. Si había otro registro válido de la misma tarea
       // (por ejemplo, un duplicado), ese sigue vigente. Es la misma regla que usa el servidor para los recordatorios.
@@ -101,6 +111,11 @@ export class Indice {
       const previo = this.porClave.get(k);
       if (!previo || momento(r) >= momento(previo)) this.porClave.set(k, r);
     }
+  }
+
+  /** Registros de gestión vigentes de un tipo, del más nuevo al más antiguo. */
+  deTipo(tipo: Registro['tipo'], desde = '', hasta = '9999'): RegistroLocal[] {
+    return this.gestion.filter((r) => r.tipo === tipo && r.fecha >= desde && r.fecha <= hasta).sort((a, b) => momento(b) - momento(a));
   }
 
   /** Última anulación de una tarea en un día, si la tarea quedó sin registro vigente. */

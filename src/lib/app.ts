@@ -297,6 +297,59 @@ export async function vincular(plantel: string, clave: string, nombreDisp: strin
   sincronizar();
 }
 
+/** Suma este teléfono al plantel con el código del QR que muestra el supervisor. Devuelve el nombre del plantel. */
+export async function vincularQR(codigo: string, nombreDisp: string): Promise<string> {
+  exigirColaVacia();
+  const r = await rpc('oc_unirse_qr', { invitacion: codigo, dispositivo: nombreDisp });
+  await instalarGranja(r, nombreDisp);
+  poner({ fase: 'ingreso', usuario: null, rolIngreso: 'operario' });
+  avisarProblema(); // los supervisores reciben el aviso de que entró un equipo nuevo
+  sincronizar();
+  return r.granja;
+}
+
+/** Computador: pide un QR para entrar con el celular del supervisor. */
+export async function pedirQrEntrada(nombreDisp: string): Promise<{ codigo: string; secreto: string; dura: number }> {
+  return rpc('oc_qr_pedir', { dispositivo: nombreDisp });
+}
+
+/** Computador: pregunta si ya aprobaron la entrada. true = entró. */
+export async function esperarQrEntrada(codigo: string, secreto: string, nombreDisp: string): Promise<boolean> {
+  const r = await rpc('oc_qr_esperar', { codigo, secreto });
+  if (r.espera) return false;
+  exigirColaVacia();
+  await instalarGranja(r, nombreDisp);
+  credenciales.sesiones[r.usuario_id] = r.sesion;
+  await idb.guardar('kv', credenciales, 'credenciales');
+  const u = (r.config as Config).usuarios.find((x) => x.id === r.usuario_id)!;
+  poner({ cambiarClave: Boolean(r.temporal), clavePlantel: r.clave_operarios ?? null });
+  await abrirSesion(u);
+  return true;
+}
+
+/** Celular del supervisor: aprueba la entrada de otro equipo que muestra un QR. */
+export async function aprobarQrEntrada(codigo: string): Promise<string> {
+  const e = leerEstado();
+  try {
+    const r = await rpc('oc_qr_aprobar', { token: e.dispositivo!.token, sesion: sesionDe(e.usuario), codigo });
+    return r.dispositivo || 'el otro equipo';
+  } catch (err) {
+    manejarErrorSesion(err);
+    throw err;
+  }
+}
+
+/** Supervisor: el código vigente para sumar teléfonos con QR (o uno nuevo, que anula el anterior). */
+export async function invitacionQR(nueva = false): Promise<{ codigo: string; vence: string; usos: number }> {
+  const e = leerEstado();
+  try {
+    return await rpc('oc_invitacion', { token: e.dispositivo!.token, sesion: sesionDe(e.usuario), nueva });
+  } catch (err) {
+    manejarErrorSesion(err);
+    throw err;
+  }
+}
+
 /**
  * Entrada del supervisor con correo y clave, desde un equipo que aún no está en su plantel.
  * Si ese correo supervisa más de un plantel, devuelve la lista para elegir.
@@ -546,19 +599,22 @@ export function abrirVisita(galponId: string) {
 
 /** Pide la ubicación en segundo plano; si no llega, el registro se guarda igual sin GPS. */
 export function ubicar(galponId: string) {
-  if (!('geolocation' in navigator)) return;
+  const anotar = (cambio: Partial<Visita>) => {
+    const v = leerEstado().visitas[galponId];
+    if (!v) return;
+    const visitas = { ...leerEstado().visitas, [galponId]: { ...v, ...cambio } };
+    poner({ visitas });
+    idb.guardar('kv', visitas, 'visitas');
+  };
+  if (!('geolocation' in navigator)) return anotar({ gpsError: 'apagada' });
   navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const v = leerEstado().visitas[galponId];
-      if (!v) return;
-      const visitas = {
-        ...leerEstado().visitas,
-        [galponId]: { ...v, lat: pos.coords.latitude, lng: pos.coords.longitude, precision: Math.round(pos.coords.accuracy) },
-      };
-      poner({ visitas });
-      idb.guardar('kv', visitas, 'visitas');
+    (pos) => anotar({ lat: pos.coords.latitude, lng: pos.coords.longitude, precision: Math.round(pos.coords.accuracy), gpsError: null }),
+    // 1 = la app no tiene permiso; 2 = la ubicación del teléfono está apagada. 3 (tardó) no es culpa de nadie: dentro
+    // de un galpón el GPS a veces no alcanza a responder, y no se marca.
+    (err) => {
+      if (err.code === 1) anotar({ gpsError: 'sin_permiso' });
+      else if (err.code === 2) anotar({ gpsError: 'apagada' });
     },
-    () => {},
     { enableHighAccuracy: true, timeout: 15000, maximumAge: 120000 },
   );
 }
@@ -589,6 +645,87 @@ export async function guardarRegistro(reg: Registro, fotos: FotoNueva[]) {
   vibrar([40, 60, 40]);
   tocar();
   sincronizar();
+}
+
+/** Trae el inventario del servidor (solo supervisor). Sin conexión queda el último que se trajo. */
+export async function traerSaldos(): Promise<void> {
+  const e = leerEstado();
+  try {
+    const r: any = await rpc('oc_saldos', { token: e.dispositivo!.token, sesion: sesionDe(e.usuario) });
+    const saldos = (r.saldos ?? []).map((x: any) => ({ ...x, q: Number(x.q), diferencia: x.diferencia == null ? null : Number(x.diferencia) }));
+    poner({ saldos, saldosHora: Date.now() });
+    await idb.guardar('kv', { saldos, hora: Date.now() }, 'saldos');
+  } catch (err) {
+    manejarErrorSesion(err);
+    if (!leerEstado().saldos) {
+      const guardado = await idb.leer<{ saldos: any[]; hora: number }>('kv', 'saldos').catch(() => undefined);
+      if (guardado) poner({ saldos: guardado.saldos, saldosHora: guardado.hora });
+    }
+    throw err;
+  }
+}
+
+/** Bitácora del plantel (solo supervisor). */
+export async function verBitacora(): Promise<{ creado: string; usuario: string | null; accion: string; detalle: string[] }[]> {
+  const e = leerEstado();
+  try {
+    return await rpc('oc_bitacora_ver', { token: e.dispositivo!.token, sesion: sesionDe(e.usuario), limite: 300 });
+  } catch (err) {
+    manejarErrorSesion(err);
+    throw err;
+  }
+}
+
+/**
+ * Arma un registro de gestión (sala de proceso, bodega, despacho, recuperación, insumos, sanidad, lote) con los datos
+ * comunes: quién, cuándo, aves del momento no aplican. La hora la pone el servidor al recibirlo.
+ */
+export function registroGestion(p: {
+  tipo: Registro['tipo'];
+  lugar: string;
+  lugarNombre: string;
+  detalle: Record<string, any>;
+  mov?: Registro['mov'];
+  nota?: string;
+  fotos?: { id: string; etiqueta: string }[];
+  flags?: Registro['flags'];
+  avisos?: string[];
+  corrige?: Registro | null;
+  motivo?: string;
+  anulado?: boolean;
+  fecha?: string;
+}): Registro {
+  const e = leerEstado();
+  const u = e.usuario!;
+  return {
+    id: uid(),
+    tipo: p.tipo,
+    fecha: p.fecha ?? p.corrige?.fecha ?? fechaLocal(ahora()),
+    galpon_id: p.lugar,
+    tarea_id: null,
+    usuario_id: u.id,
+    usuario_nombre: u.nombre,
+    galpon_nombre: p.lugarNombre,
+    tarea: null,
+    valores: [],
+    indicadores: [],
+    ok: null,
+    categoria: null,
+    nota: (p.nota ?? '').trim(),
+    fotos: p.fotos ?? [],
+    flags: [...(p.flags ?? []), ...(p.avisos?.length ? (['ilogico'] as const) : [])],
+    ...(p.avisos?.length ? { avisos: p.avisos } : {}),
+    lat: null,
+    lng: null,
+    precision: null,
+    capturado_dispositivo: ahora().toISOString(),
+    omitida: false,
+    anulado: Boolean(p.anulado),
+    corrige: p.corrige?.id ?? null,
+    motivo: p.motivo ?? '',
+    detalle: p.detalle,
+    mov: p.anulado ? [] : (p.mov ?? []),
+  };
 }
 
 export async function revisar(registroId: string, nota: string) {
@@ -852,7 +989,7 @@ export async function sincronizar(forzar = false): Promise<void> {
         continue;
       }
       try {
-        const r = await subirFoto(granjaId, f.id, f.blob);
+        const r = await subirFoto(token, granjaId, f.id, f.blob);
         if (r === 'cupo') {
           reintentarLuego(c, 'cupo');
           contarCola();
@@ -984,8 +1121,8 @@ export async function diagnostico(): Promise<{ paso: string; ok: boolean; detall
     const blob: Blob = await new Promise((ok) => lienzo.toBlob((b) => ok(b!), 'image/jpeg', 0.5));
     const id = `prueba-${uid()}`;
     await rpc('oc_permitir_prueba', { token: e.dispositivo!.token, foto: id });
-    const r = await subirFoto(e.config!.granja.id, id, blob);
-    pasos.push({ paso: 'Subida de fotos', ok: r === 'ok', detalle: r === 'ok' ? 'El servidor acepta fotos' : 'El servidor rechazó la foto: cupo lleno o falta la regla de almacenamiento' });
+    const r = await subirFoto(e.dispositivo!.token, e.config!.granja.id, id, blob);
+    pasos.push({ paso: 'Subida de fotos', ok: r === 'ok', detalle: r === 'ok' ? 'El servidor acepta fotos' : 'El servidor rechazó la foto: el espacio para fotos está lleno' });
   } catch (err) {
     pasos.push({ paso: 'Subida de fotos', ok: false, detalle: mensajeError(err) });
   }

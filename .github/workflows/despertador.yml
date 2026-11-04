@@ -1,4 +1,4 @@
-# Mantiene despierto el proyecto gratuito de Supabase (se pausa tras 7 días sin uso).
+# Revisa que la app y su base de datos respondan.
 # Visita la tarea diaria de la app dos veces al día. Si el servidor no responde, este trabajo falla
 # y GitHub le envía un correo al dueño del repositorio: así se sabe antes de que la app se detenga.
 name: Despertador
@@ -21,5 +21,5 @@ jobs:
             if [ "$codigo" = "200" ] && grep -q '"ok":true' respuesta.json; then exit 0; fi
             sleep 30
           done
-          echo "::error::El servidor de Ovo Check no respondió bien (código $codigo). Revisa si el proyecto de Supabase está pausado."
+          echo "::error::El servidor de Ovo Check no respondió bien (código $codigo). Revisa en Vercel > Storage que la base de datos esté conectada y con espacio."
           exit 1

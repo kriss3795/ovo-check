@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
-import { tocar } from './lib/app';
-import { poner, useEstado } from './lib/estado';
+import { useEffect, useState } from 'react';
+import { aprobarQrEntrada, haySesionSupervisor, tocar } from './lib/app';
+import { avisar, poner, useEstado } from './lib/estado';
+import { mensajeError } from './lib/nube';
 import { AjustePantalla } from './ui/ajustes';
-import { Aviso } from './ui/base';
+import { Aviso, Confirmar } from './ui/base';
 import { Bienvenida, CambiarClave, Desvinculado, Ingreso, SinNube } from './ui/inicio';
 import { Falta, FlujoTarea, OpGalpon, OpInicio, Problema } from './ui/operario';
 import { GalponDia, PersonaDia, RegistroDetalle, Supervisor } from './ui/supervisor';
@@ -73,6 +74,50 @@ function VersionNueva() {
   );
 }
 
+/**
+ * El supervisor escaneó (o abrió con la cámara) el QR que muestra un computador: confirma y ese equipo entra con su nombre.
+ * Si todavía no ha entrado a la app, la pregunta espera a que lo haga.
+ */
+function AprobarEntrada() {
+  const codigo = useEstado((e) => e.qrAprobar);
+  const listo = useEstado((e) => e.fase === 'app' && e.usuario?.rol === 'supervisor' && !e.cambiarClave);
+  const operario = useEstado((e) => e.fase === 'app' && e.usuario?.rol === 'operario');
+  const [ocupado, setOcupado] = useState(false);
+  useEffect(() => {
+    if (codigo && operario) {
+      poner({ qrAprobar: null });
+      avisar('Solo un supervisor puede aprobar la entrada en un computador.', 'mal');
+    }
+  }, [codigo, operario]);
+  if (!codigo || !listo) return null;
+  const cerrar = () => poner({ qrAprobar: null });
+  return (
+    <Confirmar
+      titulo="¿Entrar en el otro equipo con tu usuario?"
+      texto="Ese equipo quedará con tu sesión de supervisor y podrá ver y cambiar todo el plantel. Apruébalo solo si es tu computador o lo tienes delante."
+      accion="Sí, entrar"
+      ocupado={ocupado}
+      cerrar={cerrar}
+      alConfirmar={async () => {
+        if (!haySesionSupervisor()) {
+          cerrar();
+          return avisar('Primero entra con tu clave de supervisor en este teléfono.', 'mal');
+        }
+        setOcupado(true);
+        try {
+          const equipo = await aprobarQrEntrada(codigo);
+          avisar(`Listo: ${equipo === 'Computador' ? 'el computador' : equipo} ya entró con tu usuario`, 'ok');
+        } catch (e) {
+          avisar(mensajeError(e), 'mal');
+        } finally {
+          setOcupado(false);
+          cerrar();
+        }
+      }}
+    />
+  );
+}
+
 export function App() {
   useEffect(() => {
     const f = () => tocar();
@@ -82,6 +127,7 @@ export function App() {
   return (
     <>
       <Pantalla />
+      <AprobarEntrada />
       <Aviso />
       <VersionNueva />
     </>

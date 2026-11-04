@@ -1,6 +1,6 @@
 -- =====================================================================
---  OVO CHECK · Servidor (Supabase)
---  Pega este archivo completo en Supabase > SQL Editor y presiona "Run".
+--  OVO CHECK · Base de datos (PostgreSQL)
+--  La app la instala y actualiza sola cada vez que se publica (scripts/instalar.mjs).
 --  Se puede volver a ejecutar sin perder datos.
 -- =====================================================================
 
@@ -15,9 +15,9 @@ insert into oc_ajustes (clave, valor) values
   ('max_galpones', '60'),                        -- galpones en producción que caben (suma de todos los planteles en uso)
   ('dias_fotos', '30'),                          -- días que se guardan las fotos en la nube
   ('max_fotos_granja', '3000'),                  -- tope de fotos guardadas por plantel
-  ('max_mb_fotos_granja', '300'),                -- espacio máximo de fotos de un solo plantel
-  ('max_mb_total', '900'),                       -- tope total de fotos (el plan gratis da 1.000 MB)
-  ('max_mb_datos', '450'),                       -- tope de la base de datos (el plan gratis da 500 MB)
+  ('max_mb_fotos_granja', '250'),                -- espacio máximo de fotos de un solo plantel
+  ('max_mb_total', '550'),                       -- tope total de fotos (comparten el 1 GB gratis con los datos)
+  ('max_mb_datos', '900'),                       -- tope de la base de datos completa, fotos incluidas (el plan gratis da 1 GB)
   ('max_registros_dia', '2500'),                 -- registros que un plantel puede enviar en 24 horas
   ('dias_abandono', '180'),                      -- días sin ningún uso para dar por abandonado un plantel que nunca registró nada
   ('zona_horaria', 'America/Santiago')           -- para saber qué día es en la granja al enviar recordatorios
@@ -116,6 +116,35 @@ create index if not exists oc_suscripciones_granja on oc_suscripciones (granja_i
 alter table oc_granjas add column if not exists clave_operarios text;
 alter table oc_granjas add column if not exists nombre_norm text;
 create unique index if not exists oc_granjas_nombre_norm on oc_granjas (nombre_norm);
+-- Fotos de respaldo, dentro de la misma base de datos. Se borran solas al cumplir su plazo; si se elimina el
+-- plantel, se van con él.
+create table if not exists oc_fotos (
+  nombre text primary key,
+  granja_id uuid not null references oc_granjas (id) on delete cascade,
+  datos bytea not null,
+  tamano integer not null,
+  creado timestamptz not null default now()
+);
+create index if not exists oc_fotos_granja on oc_fotos (granja_id, creado);
+create index if not exists oc_fotos_creado on oc_fotos (creado);
+alter table oc_fotos enable row level security;
+
+-- Correcciones y anulaciones: para saber rápido qué registros siguen vigentes (inventario).
+create index if not exists oc_registros_corrige on oc_registros (granja_id, (datos ->> 'corrige')) where datos ? 'corrige';
+
+-- Bitácora: quién cambió qué en la configuración, quién entró y qué acciones de administración se hicieron.
+create table if not exists oc_bitacora (
+  id bigserial primary key,
+  granja_id uuid not null references oc_granjas (id) on delete cascade,
+  creado timestamptz not null default now(),
+  usuario text,
+  accion text not null,
+  detalle jsonb not null default '[]'::jsonb,
+  origen text
+);
+create index if not exists oc_bitacora_granja on oc_bitacora (granja_id, creado desc);
+alter table oc_bitacora enable row level security;
+
 -- Cuándo se avisó a los supervisores que su plantel, abandonado sin registros, se va a eliminar.
 alter table oc_granjas add column if not exists aviso_abandono timestamptz;
 
@@ -149,7 +178,6 @@ alter table oc_revisiones enable row level security;
 alter table oc_recuperaciones enable row level security;
 alter table oc_suscripciones enable row level security;
 alter table oc_intentos enable row level security;
-revoke all on oc_ajustes, oc_granjas, oc_dispositivos, oc_sesiones, oc_registros, oc_revisiones, oc_recuperaciones, oc_suscripciones, oc_intentos from anon, authenticated;
 
 -- ---------------------------------------------------------------------
 --  Funciones internas
@@ -301,19 +329,70 @@ $$;
 
 create or replace function oc__fotos_usadas(g uuid) returns integer
 language sql stable security definer set search_path = public, pg_temp as $$
-  select count(*)::int from storage.objects where bucket_id = 'ovocheck' and name like g::text || '/%';
+  select count(*)::int from oc_fotos where granja_id = g;
 $$;
 
 create or replace function oc__mb_fotos(g uuid) returns numeric
 language sql stable security definer set search_path = public, pg_temp as $$
-  select round(coalesce(sum((metadata ->> 'size')::bigint), 0) / 1048576.0, 1)
-  from storage.objects where bucket_id = 'ovocheck' and name like g::text || '/%';
+  select round(coalesce(sum(tamano), 0) / 1048576.0, 1) from oc_fotos where granja_id = g;
 $$;
+
+-- ---------------------------------------------------------------------
+--  Bitácora
+-- ---------------------------------------------------------------------
+create or replace function oc__bitacora(g uuid, usuario_id text, accion text, detalle jsonb default '[]'::jsonb) returns void
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare nombre text;
+begin
+  select x ->> 'nombre' into nombre from oc_granjas gr, jsonb_array_elements(gr.config -> 'usuarios') x
+    where gr.id = g and x ->> 'id' = usuario_id;
+  insert into oc_bitacora (granja_id, usuario, accion, detalle, origen)
+    values (g, coalesce(nombre, usuario_id), left(accion, 80), coalesce(detalle, '[]'::jsonb), oc__origen());
+  -- Se guardan los últimos 2.000 movimientos de cada plantel.
+  delete from oc_bitacora b where b.granja_id = g and b.id < (
+    select min(id) from (select id from oc_bitacora where granja_id = g order by id desc limit 2000) t);
+end $$;
+
+-- Qué cambió entre dos configuraciones, en palabras: agregados, quitados y modificados de cada lista.
+create or replace function oc__cambios(viejo jsonb, nuevo jsonb) returns jsonb
+language plpgsql immutable as $$
+declare
+  res jsonb := '[]'::jsonb; k text; nom text; x jsonb; y jsonb;
+  listas text[] := array['usuarios', 'galpones', 'tareas', 'lotes', 'bodegas', 'calibres', 'mermas', 'clientes', 'proveedores', 'insumos', 'plan_sanitario'];
+  nombres jsonb := '{"usuarios":"Persona","galpones":"Galpón","tareas":"Tarea","lotes":"Lote","bodegas":"Bodega","calibres":"Calibre","mermas":"Causa de merma","clientes":"Cliente","proveedores":"Proveedor","insumos":"Insumo","plan_sanitario":"Plan sanitario"}';
+begin
+  foreach k in array listas loop
+    nom := nombres ->> k;
+    for x in select e from jsonb_array_elements(case when jsonb_typeof(nuevo -> k) = 'array' then nuevo -> k else '[]' end) e loop
+      select e into y from jsonb_array_elements(case when jsonb_typeof(viejo -> k) = 'array' then viejo -> k else '[]' end) e where e ->> 'id' = x ->> 'id';
+      if y is null then
+        res := res || to_jsonb(nom || ' agregado: ' || coalesce(x ->> 'nombre', x ->> 'producto', ''));
+      elsif (y - 'pin_hash') is distinct from (x - 'pin_hash') then
+        res := res || to_jsonb(nom || ' modificado: ' || coalesce(x ->> 'nombre', x ->> 'producto', ''));
+      elsif y ->> 'pin_hash' is distinct from x ->> 'pin_hash' then
+        res := res || to_jsonb(nom || ': clave o PIN cambiado: ' || coalesce(x ->> 'nombre', ''));
+      end if;
+    end loop;
+    for y in select e from jsonb_array_elements(case when jsonb_typeof(viejo -> k) = 'array' then viejo -> k else '[]' end) e loop
+      if not exists (select 1 from jsonb_array_elements(case when jsonb_typeof(nuevo -> k) = 'array' then nuevo -> k else '[]' end) e where e ->> 'id' = y ->> 'id') then
+        res := res || to_jsonb(nom || ' quitado: ' || coalesce(y ->> 'nombre', y ->> 'producto', ''));
+      end if;
+    end loop;
+  end loop;
+  if viejo -> 'granja' ->> 'nombre' is distinct from nuevo -> 'granja' ->> 'nombre' then
+    res := res || to_jsonb('Nombre del plantel: ' || coalesce(nuevo -> 'granja' ->> 'nombre', ''));
+  end if;
+  if viejo -> 'modulos' is distinct from nuevo -> 'modulos' then res := res || '"Módulos cambiados"'::jsonb; end if;
+  if viejo -> 'logica' is distinct from nuevo -> 'logica' then res := res || '"Alertas de mediciones cambiadas"'::jsonb; end if;
+  if viejo -> 'envases' is distinct from nuevo -> 'envases' then res := res || '"Envases cambiados"'::jsonb; end if;
+  if viejo -> 'respaldo' is distinct from nuevo -> 'respaldo' then res := res || to_jsonb('Respaldo descargado: ' || coalesce(nuevo -> 'respaldo' ->> 'por', '')); end if;
+  return res;
+end $$;
 
 -- ---------------------------------------------------------------------
 --  Espacio: el servidor se mide a sí mismo para no llenarse nunca
 -- ---------------------------------------------------------------------
--- Si la base de datos gratuita se llena, Supabase la deja en "solo lectura" y nadie puede ni siquiera entrar.
+-- Si la base de datos gratuita se llena, deja de aceptar datos nuevos y nadie puede ni siquiera registrar.
 -- Para que eso no pase, la app deja de aceptar cosas un poco antes, por etapas:
 --   al 70 % no se crean planteles nuevos; al 100 % del tope (que ya es menor que el límite real) los registros
 --   esperan en cada teléfono, sin perderse, hasta que haya espacio.
@@ -327,7 +406,6 @@ create table if not exists oc_espacio (
 );
 insert into oc_espacio (id) values (true) on conflict (id) do nothing;
 alter table oc_espacio enable row level security;
-revoke all on oc_espacio from anon, authenticated;
 
 -- Mide cuánto espacio hay ocupado. La medida se guarda diez minutos para no repetirla en cada envío.
 create or replace function oc__medir(forzar boolean default false) returns oc_espacio
@@ -339,7 +417,7 @@ begin
     -- Si varios teléfonos llegan a la vez, solo el primero mide; los demás usan esa medida.
     update oc_espacio set medido = now(),
         mb_datos = round(pg_database_size(current_database()) / 1048576.0, 1),
-        mb_fotos = round(coalesce((select sum((o.metadata ->> 'size')::bigint) from storage.objects o where o.bucket_id = 'ovocheck'), 0) / 1048576.0, 1)
+        mb_fotos = round(coalesce((select sum(tamano) from oc_fotos), 0) / 1048576.0, 1)
       where id and (forzar or medido < now() - interval '10 minutes');
     select * into m from oc_espacio where id;
   end if;
@@ -407,7 +485,7 @@ begin
   n := oc__norma(cfg -> 'granja' ->> 'nombre');
   select u into sup from jsonb_array_elements(cfg -> 'usuarios') u
     where u ->> 'rol' = 'supervisor' and length(u ->> 'pin_hash') = 64 limit 1;
-  if sup is null or length(n) < 3 or length(cfg::text) > 300000
+  if sup is null or length(n) < 3 or length(cfg::text) > 800000
      or length(clave_op) < 6 or length(clave_op) > 40
      or coalesce(sup ->> 'correo', '') !~ '^[^@[:space:]]+@[^@[:space:]]+[.][^@[:space:]]+$' then
     raise exception 'OC_DATOS';
@@ -483,6 +561,7 @@ begin
   perform oc__anotar('alta:' || g.id);
   insert into oc_dispositivos (granja_id, token, nombre, visto, reconocido, avisado)
     values (g.id, oc__token_nuevo(), left(coalesce(p ->> 'dispositivo', ''), 60), now(), false, false) returning * into d;
+  perform oc__bitacora(g.id, null, 'Equipo nuevo con la clave del plantel', jsonb_build_array(d.nombre));
   return jsonb_build_object('token', d.token, 'dispositivo_id', d.id, 'version', g.version, 'config', oc__config_para(g, false));
 end $$;
 
@@ -552,6 +631,7 @@ begin
   update oc_dispositivos set fallos = 0 where id = d.id;
   delete from oc_sesiones where visto < now() - interval '30 days';
   insert into oc_sesiones (granja_id, dispositivo_id, usuario_id) values (g.id, d.id, u ->> 'id') returning id into s;
+  perform oc__bitacora(g.id, u ->> 'id', 'Entrada de supervisor', jsonb_build_array(d.nombre));
   return jsonb_build_object('sesion', s, 'version', g.version, 'config', oc__config_para(g, true),
     'temporal', coalesce((u ->> 'temporal')::boolean, false));
 end $$;
@@ -606,8 +686,61 @@ begin
         'id', id_nuevo, 'nombre', n, 'rol', 'operario', 'pin_hash', '', 'activo', true, 'estado', 'activo')), version = version + 1
       where id = g.id returning * into g;
   end if;
+  perform oc__bitacora(g.id, u ->> 'id', 'Operario agregado desde un teléfono', jsonb_build_array(n));
   return jsonb_build_object('usuario_id', id_nuevo, 'version', g.version, 'config', oc__config_para(g, false),
     'autorizo', u ->> 'nombre');
+end $$;
+
+-- Inventario: saldo de cada artículo en cada lugar, a partir de los movimientos de los registros vigentes
+-- (no anulados ni reemplazados por una corrección). Un conteo físico deja el saldo en lo contado; se informa
+-- además cuánto difería de lo que decía el sistema justo antes. Solo el supervisor, para que nadie cuente "a ojo".
+create or replace function oc_saldos(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  d oc_dispositivos; m record; clave text; saldo numeric := 0; actual text := '';
+  res jsonb := '[]'::jsonb; ult_conteo timestamptz; dif numeric; ult_mov timestamptz;
+begin
+  d := oc__dispositivo(p ->> 'token');
+  perform oc__supervisor(d, p ->> 'sesion');
+  for m in
+    select x ->> 'b' as b, x ->> 'k' as k, (x ->> 'q')::numeric as q, coalesce((x ->> 'set')::boolean, false) as fija, r.capturado
+    from oc_registros r, jsonb_array_elements(r.datos -> 'mov') x
+    where r.granja_id = d.granja_id and jsonb_typeof(r.datos -> 'mov') = 'array'
+      and not coalesce((r.datos ->> 'anulado')::boolean, false)
+      and not exists (select 1 from oc_registros c where c.granja_id = r.granja_id and c.datos ->> 'corrige' = r.id::text)
+    order by 1, 2, r.capturado, r.id
+  loop
+    clave := m.b || '|' || m.k;
+    if clave <> actual then
+      if actual <> '' then
+        res := res || jsonb_build_object('b', split_part(actual, '|', 1), 'k', split_part(actual, '|', 2), 'q', saldo,
+          'conteo', ult_conteo, 'diferencia', dif, 'ultimo', ult_mov);
+      end if;
+      actual := clave; saldo := 0; ult_conteo := null; dif := null;
+    end if;
+    if m.fija then
+      dif := m.q - saldo; saldo := m.q; ult_conteo := m.capturado;
+    else
+      saldo := saldo + m.q;
+    end if;
+    ult_mov := m.capturado;
+  end loop;
+  if actual <> '' then
+    res := res || jsonb_build_object('b', split_part(actual, '|', 1), 'k', split_part(actual, '|', 2), 'q', saldo,
+      'conteo', ult_conteo, 'diferencia', dif, 'ultimo', ult_mov);
+  end if;
+  return jsonb_build_object('saldos', res, 'ahora', now());
+end $$;
+
+-- Bitácora del plantel (solo supervisor): los últimos movimientos, del más nuevo al más antiguo.
+create or replace function oc_bitacora_ver(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare d oc_dispositivos;
+begin
+  d := oc__dispositivo(p ->> 'token');
+  perform oc__supervisor(d, p ->> 'sesion');
+  return coalesce((select jsonb_agg(jsonb_build_object('creado', b.creado, 'usuario', b.usuario, 'accion', b.accion, 'detalle', b.detalle) order by b.id desc)
+    from (select * from oc_bitacora where granja_id = d.granja_id order by id desc limit least(coalesce((p ->> 'limite')::int, 200), 500)) b), '[]'::jsonb);
 end $$;
 
 -- Al cerrar sesión, la sesión de supervisor deja de existir también en el servidor.
@@ -797,7 +930,7 @@ begin
     return jsonb_build_object('error', 'OC_CONFLICTO', 'version', g.version, 'config', oc__config_para(g, true));
   end if;
   cfg := p -> 'config';
-  if cfg is null or length(cfg::text) > 300000 or jsonb_typeof(cfg -> 'usuarios') <> 'array'
+  if cfg is null or length(cfg::text) > 800000 or jsonb_typeof(cfg -> 'usuarios') <> 'array'
      or jsonb_typeof(cfg -> 'galpones') <> 'array' or jsonb_typeof(cfg -> 'tareas') <> 'array' then
     raise exception 'OC_DATOS';
   end if;
@@ -828,6 +961,7 @@ begin
     raise exception 'OC_SIN_SUPERVISOR';
   end if;
   cfg := jsonb_set(cfg, '{granja}', (cfg -> 'granja') || jsonb_build_object('id', g.id, 'codigo', g.codigo));
+  perform oc__bitacora(g.id, u, 'Configuración', oc__cambios(g.config, cfg));
   update oc_granjas set config = cfg, nombre = coalesce(cfg -> 'granja' ->> 'nombre', nombre), nombre_norm = n, version = version + 1
     where id = g.id returning * into g;
   return jsonb_build_object('version', g.version, 'config', oc__config_para(g, true));
@@ -863,7 +997,17 @@ begin
   desfase := coalesce(round(extract(epoch from (now() - (p ->> 'ahora')::timestamptz)))::int, 0);
   for it in select * from jsonb_array_elements(p -> 'items') loop
     r := (it -> 'registro') - 'capturado' - 'recibido' - 'reloj_desfase_s' - 'demora_s' - 'dispositivo_id';
-    if length(r::text) > 6000 or coalesce(r ->> 'id', '') !~ '^[0-9a-f-]{36}$' or coalesce(r ->> 'fecha', '') !~ '^\d{4}-\d{2}-\d{2}$' then
+    if coalesce(r ->> 'id', '') !~ '^[0-9a-f-]{36}$' or coalesce(r ->> 'fecha', '') !~ '^\d{4}-\d{2}-\d{2}$'
+       or coalesce(r ->> 'tipo', '') not in ('tarea', 'problema', 'proceso', 'bodega', 'despacho', 'recuperacion', 'insumo', 'sanidad', 'lote')
+       or length(r::text) > (case when r ->> 'tipo' in ('tarea', 'problema') then 6000 else 20000 end) then
+      continue;
+    end if;
+    -- Movimientos de inventario: una lista corta de números razonables.
+    if r ? 'mov' and (jsonb_typeof(r -> 'mov') <> 'array' or jsonb_array_length(r -> 'mov') > 80 or exists (
+         select 1 from jsonb_array_elements(r -> 'mov') m
+         where jsonb_typeof(m -> 'q') <> 'number' or abs((m ->> 'q')::numeric) > 100000000
+            or length(coalesce(m ->> 'b', '')) not between 1 and 60 or length(coalesce(m ->> 'k', '')) not between 1 and 60)) then
+      rechazados := rechazados || jsonb_build_object('id', r ->> 'id', 'motivo', 'datos');
       continue;
     end if;
     select * into fila from oc_registros where id = (r ->> 'id')::uuid;
@@ -884,6 +1028,12 @@ begin
       continue;
     end if;
     if u is null or u ->> 'rol' <> 'supervisor' then
+      -- Un operario solo registra en las áreas que el supervisor le asignó. Los lotes los maneja el supervisor.
+      if r ->> 'tipo' not in ('tarea', 'problema') and (r ->> 'tipo' = 'lote' or u is null or not (
+           coalesce(u -> 'areas', '[]'::jsonb) ? (case r ->> 'tipo' when 'despacho' then 'despachos' when 'insumo' then 'insumos' else r ->> 'tipo' end))) then
+        rechazados := rechazados || jsonb_build_object('id', r ->> 'id', 'motivo', 'permiso');
+        continue;
+      end if;
       if coalesce((r ->> 'anulado')::boolean, false) then
         rechazados := rechazados || jsonb_build_object('id', r ->> 'id', 'motivo', 'permiso');
         continue;
@@ -905,7 +1055,7 @@ begin
     insert into oc_registros (id, granja_id, dispositivo_id, fecha, galpon_id, datos, capturado, reloj_desfase_s, demora_s, critico)
       values ((r ->> 'id')::uuid, d.granja_id, d.id, (r ->> 'fecha')::date, r ->> 'galpon_id', r,
               cap, desfase, round(ms / 1000)::int,
-              coalesce(jsonb_typeof(r -> 'flags') = 'array' and (r -> 'flags') ?| array['problema', 'retrocede', 'no_calza', 'ilogico'], false)
+              coalesce(jsonb_typeof(r -> 'flags') = 'array' and (r -> 'flags') ?| array['problema', 'retrocede', 'no_calza', 'ilogico', 'gps_apagado'], false)
                 and not coalesce((r ->> 'anulado')::boolean, false))
       on conflict (id) do nothing;
     select * into fila from oc_registros where id = (r ->> 'id')::uuid and granja_id = d.granja_id;
@@ -999,6 +1149,11 @@ declare d oc_dispositivos; g oc_granjas; u text;
 begin
   d := oc__dispositivo(p ->> 'token');
   u := oc__supervisor(d, p ->> 'sesion');
+  if p ->> 'accion' in ('desvincular', 'permitir', 'clave_operarios') then
+    perform oc__bitacora(d.granja_id, u, case p ->> 'accion' when 'desvincular' then 'Teléfono desvinculado'
+      when 'permitir' then 'Teléfono permitido de nuevo' else 'Clave del plantel cambiada' end,
+      coalesce((select jsonb_build_array(x.nombre) from oc_dispositivos x where x.id::text = p ->> 'dispositivo_id'), '[]'::jsonb));
+  end if;
   if p ->> 'accion' = 'desvincular' then
     update oc_dispositivos set revocado = true
       where granja_id = d.granja_id and id = (p ->> 'dispositivo_id')::uuid and id <> d.id;
@@ -1176,6 +1331,7 @@ begin
         and t.x ->> 'bloque' = p ->> 'bloque'
         and (t.x -> 'dias') @> to_jsonb(dia)
         and (jsonb_typeof(t.x -> 'galpones') <> 'array' or (t.x -> 'galpones') ? (gp.x ->> 'id'))
+        and coalesce(t.x ->> 'etapa', 'produccion') in ('todas', coalesce(gp.x ->> 'tipo', 'produccion'))
         and not exists (
           select 1 from oc_registros r
           where r.granja_id = g.id and r.fecha = hoy and r.galpon_id = gp.x ->> 'id' and r.datos ->> 'tarea_id' = t.x ->> 'id'
@@ -1195,9 +1351,9 @@ language sql stable security definer set search_path = public, pg_temp as $$
   select coalesce(jsonb_agg(jsonb_build_object('granja', g.nombre, 'fotos', f.n, 'dias', oc__ajuste('dias_fotos')::int,
            'supervisores', oc__suscripciones(g, 'supervisor'))), '[]'::jsonb)
   from oc_granjas g
-  join lateral (select count(*)::int as n from storage.objects o
-                where o.bucket_id = 'ovocheck' and o.name like g.id::text || '/%'
-                  and o.created_at < now() - ((oc__ajuste('dias_fotos')::int - 7) || ' days')::interval) f on f.n > 0;
+  join lateral (select count(*)::int as n from oc_fotos o
+                where o.granja_id = g.id
+                  and o.creado < now() - ((oc__ajuste('dias_fotos')::int - 7) || ' days')::interval) f on f.n > 0;
 $$;
 
 -- Suscripción del propio teléfono (para la notificación de prueba) y limpieza de las que ya no existen.
@@ -1217,40 +1373,46 @@ language sql security definer set search_path = public, pg_temp as $$
 $$;
 
 -- ---------------------------------------------------------------------
---  Fotos (Storage)
+--  Fotos
 -- ---------------------------------------------------------------------
+drop function if exists oc_cupo_ok(text);
+drop function if exists oc_fotos_vencidas(jsonb);
 
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-  values ('ovocheck', 'ovocheck', true, 250000, array['image/jpeg'])
-  on conflict (id) do update set public = true, file_size_limit = 250000, allowed_mime_types = array['image/jpeg'];
-
--- Una foto solo se acepta si pertenece a un registro que ese plantel ya envió (los registros exigen un teléfono
--- del plantel), y mientras quede cupo. Así nadie de fuera puede llenar el espacio con archivos.
-create or replace function oc_cupo_ok(nombre text) returns boolean
-language plpgsql stable security definer set search_path = public, pg_temp as $$
-declare carpeta text := split_part(nombre, '/', 1); foto text; total bigint;
+-- Guarda una foto. Solo se acepta desde un teléfono del plantel, si pertenece a un registro que ese plantel ya
+-- envió (o es la foto de prueba de "Probar conexión") y mientras quede espacio. Así nadie de fuera llena la base.
+create or replace function oc_foto_guardar(p jsonb, datos bytea) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare d oc_dispositivos; n text := coalesce(p ->> 'nombre', ''); carpeta text; foto text; total bigint;
 begin
-  if nombre !~ '^[0-9a-f-]{36}/[0-9a-z-]{36,60}\.jpg$' then
-    return false;
+  d := oc__dispositivo(p ->> 'token');
+  if n !~ '^[0-9a-f-]{36}/[0-9a-z-]{36,60}\.jpg$' then
+    raise exception 'OC_DATOS';
   end if;
-  foto := regexp_replace(split_part(nombre, '/', 2), '\.jpg$', '');
-  if not exists (select 1 from oc_granjas where id = carpeta::uuid) then
-    return false;
+  carpeta := split_part(n, '/', 1);
+  foto := regexp_replace(split_part(n, '/', 2), '\.jpg$', '');
+  if carpeta <> d.granja_id::text or datos is null or length(datos) > 250000 or length(datos) < 100
+     or substring(datos from 1 for 3) <> '\xffd8ff'::bytea then
+    raise exception 'OC_DATOS';
+  end if;
+  if exists (select 1 from oc_fotos f where f.nombre = n) then
+    return jsonb_build_object('ok', true, 'repetida', true);
   end if;
   if not exists (select 1 from oc_registros r
-                 where r.granja_id = carpeta::uuid and (r.datos -> 'fotos') @> jsonb_build_array(jsonb_build_object('id', foto)))
-     and not exists (select 1 from oc_intentos i where i.llave = 'foto:' || nombre and i.creado > now() - interval '5 minutes') then
-    return false;
+                 where r.granja_id = d.granja_id and (r.datos -> 'fotos') @> jsonb_build_array(jsonb_build_object('id', foto)))
+     and not exists (select 1 from oc_intentos i where i.llave = 'foto:' || n and i.creado > now() - interval '5 minutes') then
+    return jsonb_build_object('error', 'OC_FOTO_SIN_REGISTRO');
   end if;
-  if oc__fotos_usadas(carpeta::uuid) >= coalesce(oc__ajuste('max_fotos_granja')::int, 3000)
-     or oc__mb_fotos(carpeta::uuid) >= coalesce(oc__ajuste('max_mb_fotos_granja')::numeric, 300) then
-    return false;
+  if oc__fotos_usadas(d.granja_id) >= coalesce(oc__ajuste('max_fotos_granja')::int, 3000)
+     or oc__mb_fotos(d.granja_id) >= coalesce(oc__ajuste('max_mb_fotos_granja')::numeric, 250) then
+    return jsonb_build_object('error', 'OC_CUPO');
   end if;
-  select coalesce(sum((metadata ->> 'size')::bigint), 0) into total from storage.objects where bucket_id = 'ovocheck';
-  if total >= coalesce(oc__ajuste('max_mb_total')::bigint, 900) * 1048576 then
-    return false;
+  select coalesce(sum(tamano), 0) into total from oc_fotos;
+  if total >= coalesce(oc__ajuste('max_mb_total')::bigint, 550) * 1048576 or oc__lleno() then
+    return jsonb_build_object('error', 'OC_CUPO');
   end if;
-  return true;
+  insert into oc_fotos (nombre, granja_id, datos, tamano) values (n, d.granja_id, datos, length(datos))
+    on conflict do nothing;
+  return jsonb_build_object('ok', true);
 end $$;
 
 -- Permiso de cinco minutos para subir la foto de prueba de "Probar conexión".
@@ -1270,26 +1432,17 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
-drop policy if exists "ovocheck subir fotos" on storage.objects;
-create policy "ovocheck subir fotos" on storage.objects
-  for insert to anon, authenticated
-  with check (bucket_id = 'ovocheck' and public.oc_cupo_ok(name));
-
--- Lista de fotos por borrar en la limpieza diaria (solo con la clave de servicio): las que cumplieron su plazo,
--- las de planteles eliminados y las de prueba.
-create or replace function oc_fotos_vencidas(p jsonb) returns jsonb
-language sql stable security definer set search_path = public, pg_temp as $$
-  select jsonb_build_object(
-    'dias', oc__ajuste('dias_fotos')::int,
-    'nombres', coalesce((select jsonb_agg(n) from (
-      select o.name as n from storage.objects o
-      where o.bucket_id = 'ovocheck'
-        and (o.created_at < now() - (oc__ajuste('dias_fotos') || ' days')::interval
-             or (o.created_at < now() - interval '1 hour'
-                 and (split_part(o.name, '/', 2) like 'prueba-%'
-                      or not exists (select 1 from oc_granjas g where g.id::text = split_part(o.name, '/', 1)))))
-      order by o.created_at limit least(coalesce((p ->> 'limite')::int, 500), 1000)) t), '[]'::jsonb));
-$$;
+-- Limpieza diaria: borra las fotos que cumplieron su plazo y las de prueba. (Solo el servidor de la app.)
+create or replace function oc_fotos_borrar_vencidas(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare n integer;
+begin
+  delete from oc_fotos o
+    where o.creado < now() - (oc__ajuste('dias_fotos') || ' days')::interval
+       or (o.creado < now() - interval '1 hour' and split_part(o.nombre, '/', 2) like 'prueba-%');
+  get diagnostics n = row_count;
+  return jsonb_build_object('dias', oc__ajuste('dias_fotos')::int, 'borradas', n);
+end $$;
 
 -- Cuánto espacio queda (solo el servidor de la app, una vez al día). Dice además si toca avisar por correo
 -- a quien administra la app: al pasar el 60 %, el 80 % y el 95 %, y una vez por semana mientras siga sobre el 80 %.
@@ -1367,6 +1520,33 @@ begin
   return res;
 end $$;
 
+-- Vacunas y tratamientos del plan sanitario que tocan hoy o mañana según la edad de cada lote activo, sin registro
+-- de aplicación todavía. (Solo el servidor de la app.)
+create or replace function oc_sanidad_por_avisar(p jsonb) returns jsonb
+language sql stable security definer set search_path = public, pg_temp as $$
+  with hoy as (select (now() at time zone coalesce(oc__ajuste('zona_horaria'), 'America/Santiago'))::date as d),
+  item as (
+    select g.id as gid, g.nombre as granja, l.x ->> 'nombre' as lote, l.x ->> 'id' as lote_id, pl.x ->> 'producto' as producto,
+           pl.x ->> 'id' as plan_id, (l.x ->> 'nacimiento')::date + ((pl.x ->> 'semana')::int - 1) * 7 as fecha
+    from oc_granjas g, hoy,
+         jsonb_array_elements(case when jsonb_typeof(g.config -> 'lotes') = 'array' then g.config -> 'lotes' else '[]' end) l(x),
+         jsonb_array_elements(case when jsonb_typeof(g.config -> 'plan_sanitario') = 'array' then g.config -> 'plan_sanitario' else '[]' end) pl(x)
+    where l.x ->> 'estado' = 'activo' and coalesce(l.x ->> 'nacimiento', '') ~ '^\d{4}-\d{2}-\d{2}$'
+      and coalesce(pl.x ->> 'etapa', l.x ->> 'etapa') = l.x ->> 'etapa'
+      and (g.config -> 'modulos' ->> 'sanidad') is distinct from 'false'
+  )
+  select coalesce(jsonb_agg(jsonb_build_object('granja', t.granja, 'supervisores', oc__suscripciones(g, 'supervisor'), 'items', t.items)), '[]'::jsonb)
+  from (
+    select i.gid, i.granja, jsonb_agg(jsonb_build_object('lote', i.lote, 'producto', i.producto, 'fecha', i.fecha) order by i.fecha) as items
+    from item i, hoy
+    where i.fecha between hoy.d and hoy.d + 1
+      and not exists (select 1 from oc_registros r where r.granja_id = i.gid and r.datos ->> 'tipo' = 'sanidad'
+                      and not coalesce((r.datos ->> 'anulado')::boolean, false)
+                      and r.datos -> 'detalle' ->> 'plan_id' = i.plan_id and r.datos -> 'detalle' -> 'lote_ids' ? i.lote_id)
+    group by i.gid, i.granja
+  ) t join oc_granjas g on g.id = t.gid;
+$$;
+
 -- Teléfonos que llevan más de un día sin conectarse y con registros sin enviar: lo que tienen guardado solo existe
 -- en ese teléfono. (Solo el servidor de la app.)
 create or replace function oc_telefonos_atrasados(p jsonb) returns jsonb
@@ -1398,9 +1578,9 @@ language sql stable security definer set search_path = public, pg_temp as $$
 $$;
 
 -- ---------------------------------------------------------------------
---  Soporte (se ejecuta solo desde este SQL Editor)
+--  Soporte (se ejecuta a mano en la consola SQL de Neon)
 -- ---------------------------------------------------------------------
--- Si contratas el plan Pro de Supabase, avísale a la app que ahora tiene más espacio:
+-- Si contratas un plan pagado de Neon, avísale a la app que ahora tiene más espacio:
 --   select oc_soporte_plan('pro');       (para volver atrás: select oc_soporte_plan('gratis');)
 drop function if exists oc_soporte_plan(text);
 create function oc_soporte_plan(plan text) returns text
@@ -1408,8 +1588,8 @@ language plpgsql security definer set search_path = public, pg_temp as $$
 declare v jsonb;
 begin
   v := case lower(trim(plan))
-    when 'pro' then '{"max_mb_datos":"7200","max_mb_total":"95000","max_mb_fotos_granja":"4000","max_fotos_granja":"30000","max_galpones":"1500","max_granjas":"1000","max_granjas_dia":"50","max_registros_dia":"10000"}'::jsonb
-    when 'gratis' then '{"max_mb_datos":"450","max_mb_total":"900","max_mb_fotos_granja":"300","max_fotos_granja":"3000","max_galpones":"60","max_granjas":"100","max_granjas_dia":"8","max_registros_dia":"2500"}'::jsonb
+    when 'pro' then '{"max_mb_datos":"9000","max_mb_total":"6000","max_mb_fotos_granja":"1500","max_fotos_granja":"30000","max_galpones":"300","max_granjas":"1000","max_granjas_dia":"50","max_registros_dia":"10000"}'::jsonb
+    when 'gratis' then '{"max_mb_datos":"900","max_mb_total":"550","max_mb_fotos_granja":"250","max_fotos_granja":"3000","max_galpones":"60","max_granjas":"100","max_granjas_dia":"8","max_registros_dia":"2500"}'::jsonb
     else null end;
   if v is null then return 'Escribe pro o gratis'; end if;
   insert into oc_ajustes (clave, valor) select key, value from jsonb_each_text(v)
@@ -1454,37 +1634,153 @@ end $$;
 
 -- Resumen de uso, para mirar de vez en cuando:  select * from oc_soporte_uso;
 drop view if exists oc_soporte_uso;
-create view oc_soporte_uso with (security_invoker = true) as
+create view oc_soporte_uso as
   select g.nombre, g.creado::date as creado,
     (select count(*) from oc_registros r where r.granja_id = g.id) as registros,
     (select max(r.recibido) from oc_registros r where r.granja_id = g.id) as ultimo_registro,
     oc__fotos_usadas(g.id) as fotos, oc__mb_fotos(g.id) as mb_fotos
   from oc_granjas g order by g.creado;
-revoke all on oc_soporte_uso from anon, authenticated;
 
--- ---------------------------------------------------------------------
---  Permisos
--- ---------------------------------------------------------------------
-do $$
-declare f record;
+-- ===================== Entrar con QR =====================
+-- 1) Invitación del plantel: el supervisor muestra un QR; el operario lo escanea y su teléfono queda en el plantel,
+--    sin escribir el nombre ni la clave. El código vence a los 30 días y se puede cambiar (el anterior deja de servir).
+-- 2) Entrar en el computador con el celular: el computador muestra un QR que dura 3 minutos; el supervisor lo
+--    escanea desde la app en su celular (ya con su sesión abierta), lo aprueba, y el computador entra con su nombre.
+create table if not exists oc_invitaciones (
+  codigo text primary key,
+  granja_id uuid not null references oc_granjas (id) on delete cascade,
+  creado timestamptz not null default now(),
+  vence timestamptz not null,
+  usos integer not null default 0,
+  creado_por text
+);
+create index if not exists oc_invitaciones_granja on oc_invitaciones (granja_id);
+
+create table if not exists oc_qr_entradas (
+  codigo text primary key,
+  secreto text not null,
+  creado timestamptz not null default now(),
+  dispositivo text not null default '',
+  granja_id uuid references oc_granjas (id) on delete cascade,
+  usuario_id text,
+  aprobado timestamptz,
+  usado boolean not null default false
+);
+
+-- Código corto, sin letras que se confundan, para el QR (y para dictarlo si la cámara falla).
+create or replace function oc__codigo_corto(largo integer) returns text
+language sql volatile as $$
+  select string_agg(substr('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 1 + floor(random() * 32)::int, 1), '')
+  from generate_series(1, largo);
+$$;
+
+-- Supervisor: ver (o crear) la invitación vigente del plantel. {token, sesion, nueva?:true}
+create or replace function oc_invitacion(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare d oc_dispositivos; u text; i oc_invitaciones;
 begin
-  for f in select p.oid::regprocedure as firma, p.proname from pg_proc p
-           join pg_namespace n on n.oid = p.pronamespace
-           where n.nspname = 'public' and p.proname like 'oc\_%' loop
-    execute format('revoke execute on function %s from public, anon, authenticated', f.firma);
-    if f.proname in ('oc_crear_granja', 'oc_buscar_granja', 'oc_unirse', 'oc_entrar_supervisor', 'oc_recuperar_correo', 'oc_login', 'oc_crear_pin', 'oc_cambiar_clave', 'oc_recuperar',
-                     'oc_guardar_config', 'oc_registrar', 'oc_sync', 'oc_registros', 'oc_revisar', 'oc_salir', 'oc_permitir_prueba', 'oc_autorizar_operario',
-                     'oc_admin', 'oc_cupo_ok', 'oc_suscribir', 'oc_desuscribir') then
-      execute format('grant execute on function %s to anon, authenticated', f.firma);
-    end if;
-    if f.proname in ('oc_fotos_vencidas', 'oc_recuperacion_pedir', 'oc_avisos_pendientes', 'oc_pendientes_del_dia',
-                     'oc_fotos_por_vencer', 'oc_suscripcion_propia', 'oc_suscripciones_borrar', 'oc_equipos_por_avisar', 'oc_turno',
-                     'oc_uso', 'oc_limpieza', 'oc_abandono_por_avisar', 'oc_telefonos_atrasados', 'oc_respaldo_diario') then
-      execute format('grant execute on function %s to service_role', f.firma);
-    end if;
-  end loop;
+  d := oc__dispositivo(p ->> 'token');
+  u := oc__supervisor(d, p ->> 'sesion');
+  if coalesce((p ->> 'nueva')::boolean, false) then
+    delete from oc_invitaciones where granja_id = d.granja_id;
+    perform oc__bitacora(d.granja_id, u, 'Cambió el QR para sumar teléfonos', '[]'::jsonb);
+  end if;
+  select * into i from oc_invitaciones where granja_id = d.granja_id and vence > now() order by creado desc limit 1;
+  if not found then
+    delete from oc_invitaciones where granja_id = d.granja_id;
+    insert into oc_invitaciones (codigo, granja_id, vence, creado_por)
+      values (oc__codigo_corto(12), d.granja_id, now() + interval '30 days', u) returning * into i;
+  end if;
+  return jsonb_build_object('codigo', i.codigo, 'vence', i.vence, 'usos', i.usos);
 end $$;
 
-notify pgrst, 'reload schema';
+-- Teléfono nuevo con el QR del plantel. {invitacion, dispositivo}
+create or replace function oc_unirse_qr(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare i oc_invitaciones; g oc_granjas; d oc_dispositivos; origen text := oc__origen(); c text := upper(trim(coalesce(p ->> 'invitacion', '')));
+begin
+  if oc__frenado('qr:' || origen, case when origen = 'sin-ip' then 60 else 15 end) then
+    return jsonb_build_object('error', 'OC_BLOQUEO');
+  end if;
+  select * into i from oc_invitaciones where codigo = c and vence > now();
+  if not found then
+    perform oc__anotar('qr:' || origen);
+    perform pg_sleep(0.3);
+    return jsonb_build_object('error', 'OC_QR_VENCIDO');
+  end if;
+  select * into g from oc_granjas where id = i.granja_id;
+  if oc__frenado('alta:' || g.id, 40, interval '1 hour')
+     or (select count(*) from oc_dispositivos x where x.granja_id = g.id) >= 2000 then
+    return jsonb_build_object('error', 'OC_BLOQUEO');
+  end if;
+  perform oc__anotar('alta:' || g.id);
+  update oc_invitaciones set usos = usos + 1 where codigo = c;
+  insert into oc_dispositivos (granja_id, token, nombre, visto, reconocido, avisado)
+    values (g.id, oc__token_nuevo(), left(coalesce(p ->> 'dispositivo', ''), 60), now(), false, false) returning * into d;
+  perform oc__bitacora(g.id, null, 'Equipo nuevo con el QR del plantel', jsonb_build_array(d.nombre));
+  return jsonb_build_object('token', d.token, 'dispositivo_id', d.id, 'version', g.version, 'config', oc__config_para(g, false),
+    'granja', g.nombre);
+end $$;
+
+-- Computador: pedir un QR para entrar. {dispositivo}  ->  {codigo, secreto}
+create or replace function oc_qr_pedir(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare origen text := oc__origen(); c text; s text;
+begin
+  if oc__frenado('qrpedir:' || origen, case when origen = 'sin-ip' then 120 else 30 end) then
+    return jsonb_build_object('error', 'OC_BLOQUEO');
+  end if;
+  perform oc__anotar('qrpedir:' || origen);
+  delete from oc_qr_entradas where creado < now() - interval '1 hour';
+  c := oc__codigo_corto(10);
+  s := oc__token_nuevo();
+  insert into oc_qr_entradas (codigo, secreto, dispositivo) values (c, s, left(coalesce(p ->> 'dispositivo', ''), 60));
+  return jsonb_build_object('codigo', c, 'secreto', s, 'dura', 180);
+end $$;
+
+-- Celular del supervisor: aprobar la entrada del computador. {token, sesion, codigo}
+create or replace function oc_qr_aprobar(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare d oc_dispositivos; u text; q oc_qr_entradas;
+begin
+  d := oc__dispositivo(p ->> 'token');
+  u := oc__supervisor(d, p ->> 'sesion');
+  select * into q from oc_qr_entradas where codigo = upper(trim(coalesce(p ->> 'codigo', '')))
+    and creado > now() - interval '3 minutes' and aprobado is null and not usado;
+  if not found then
+    return jsonb_build_object('error', 'OC_QR_VENCIDO');
+  end if;
+  update oc_qr_entradas set aprobado = now(), granja_id = d.granja_id, usuario_id = u where codigo = q.codigo;
+  return jsonb_build_object('ok', true, 'dispositivo', q.dispositivo);
+end $$;
+
+-- Computador: preguntar si ya lo aprobaron. {codigo, secreto}  ->  {espera:true} | datos de entrada | error
+create or replace function oc_qr_esperar(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare q oc_qr_entradas; g oc_granjas; u jsonb; d oc_dispositivos; s uuid;
+begin
+  select * into q from oc_qr_entradas where codigo = upper(trim(coalesce(p ->> 'codigo', '')))
+    and secreto = coalesce(p ->> 'secreto', '') and not usado;
+  if not found or (q.aprobado is null and q.creado < now() - interval '3 minutes') then
+    return jsonb_build_object('error', 'OC_QR_VENCIDO');
+  end if;
+  if q.aprobado is null then
+    return jsonb_build_object('espera', true);
+  end if;
+  update oc_qr_entradas set usado = true where codigo = q.codigo;
+  select * into g from oc_granjas where id = q.granja_id;
+  select x into u from jsonb_array_elements(g.config -> 'usuarios') x
+    where x ->> 'id' = q.usuario_id and (x ->> 'activo')::boolean and x ->> 'rol' = 'supervisor';
+  if u is null then
+    return jsonb_build_object('error', 'OC_QR_VENCIDO');
+  end if;
+  insert into oc_dispositivos (granja_id, token, nombre, visto, usuario_id, reconocido, avisado)
+    values (g.id, oc__token_nuevo(), coalesce(nullif(q.dispositivo, ''), 'Computador'), now(), u ->> 'id', true, true) returning * into d;
+  insert into oc_sesiones (granja_id, dispositivo_id, usuario_id) values (g.id, d.id, u ->> 'id') returning id into s;
+  perform oc__bitacora(g.id, u ->> 'id', 'Entrada con QR desde otro equipo', jsonb_build_array(d.nombre));
+  return jsonb_build_object('token', d.token, 'dispositivo_id', d.id, 'sesion', s, 'usuario_id', u ->> 'id',
+    'version', g.version, 'config', oc__config_para(g, true), 'clave_operarios', g.clave_operarios,
+    'temporal', coalesce((u ->> 'temporal')::boolean, false));
+end $$;
 
 select 'Ovo Check instalado' as resultado;
