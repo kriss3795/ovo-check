@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Printer } from 'lucide-react';
 import { asegurarPeriodo } from '../lib/app';
 import { ir, useEstado } from '../lib/estado';
-import { edadSemanas, edadTexto, nombreLinea, rubroDe, estandarDe } from '../lib/estandar';
+import { edadSemanas, edadTexto, nombreLinea, rubroGalpon, estandarDe } from '../lib/estandar';
 import { diaGalpon } from '../lib/indicadores';
 import { inicioLote, resumenGalpon, semanasGalpon, type Semana } from '../lib/semanas';
 import type { Galpon } from '../lib/tipos';
@@ -54,7 +54,7 @@ export function Produccion() {
   if (!g) return <p className="suave">Agrega un galpón en Ajustes para ver su producción.</p>;
   const linea = g.linea ? { nombre: nombreLinea(g.linea) } : null;
   const edad = edadSemanas(g, hoy);
-  const engorda = rubroDe(g.linea) === 'engorda';
+  const engorda = rubroGalpon(g) === 'engorda';
   return (
     <div className="produccion">
       <header className="prod-cabeza">

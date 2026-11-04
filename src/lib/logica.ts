@@ -1,5 +1,5 @@
 // Reglas del día a día: qué tareas tocan, qué está hecho y qué se marca para el supervisor.
-import { avisosCurva, estadisticaMuestra, rubroDe } from './estandar';
+import { avisosCurva, estadisticaMuestra, rubroGalpon } from './estandar';
 import type { Campo, Config, Flag, Galpon, Logica, Pausa, Registro, RegistroLocal, Revision, Tarea } from './tipos';
 import { tareaParaGalpon } from './modulos';
 import { BIBLIOTECA, RUTINA_CLASICA } from './plantillas';
@@ -66,8 +66,9 @@ export function tareasDe(config: Config, galponId: string, fecha: string): Tarea
       t.dias.includes(dia) &&
       (t.galpones === null || t.galpones.includes(galponId)) &&
       tareaParaGalpon(t.etapa, galpon) &&
+      (!t.rubros?.length || t.rubros.includes(rubroGalpon(galpon))) &&
       // Un galpón de pollos de engorda no recolecta huevos.
-      !(rubroDe(galpon?.linea) === 'engorda' && t.campos.some((_, i) => magnitud(t.campos, i) === 'postura')),
+      !(rubroGalpon(galpon) === 'engorda' && t.campos.some((_, i) => magnitud(t.campos, i) === 'postura')),
   );
 }
 
