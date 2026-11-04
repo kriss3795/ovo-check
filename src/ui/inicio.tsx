@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, ChevronRight, ClipboardCheck, QrCode, ScanLine, Eye, EyeOff, KeyRound, Mail, Minus, Plus, ShieldCheck, UserPlus } from 'lucide-react';
+import { CheckCircle2, ChevronRight, ClipboardCheck, PlayCircle, QrCode, ScanLine, Eye, EyeOff, KeyRound, Mail, Minus, Plus, ShieldCheck, UserPlus } from 'lucide-react';
 import {
   autorizarOperario, buscarPlantel, cambiarClave, comprobarVinculo, crearGranja, crearPin, entrarOperario, entrarSupervisor, entrarSupervisorCorreo, pedirCodigo,
-  pedirCodigoCorreo, recuperarClave, recuperarClaveCorreo, salir, vincular, vincularQR, pedirQrEntrada, esperarQrEntrada,
+  pedirCodigoCorreo, recuperarClave, recuperarClaveCorreo, salir, vincular, vincularQR, pedirQrEntrada, esperarQrEntrada, entrarDemo,
 } from '../lib/app';
 import { CodigoQR, EscanerQR, codigoLegible, enlaceAprobar, leerQR } from './qr';
 import { avisar, leerEstado, poner, useEstado } from '../lib/estado';
@@ -86,6 +86,7 @@ export function Bienvenida() {
           El registro diario de cada galpón, con respaldo y directo al supervisor.
         </p>
         <ElegirRol alElegir={setPaso} />
+        <BotonDemo />
         <BotonInstalar />
         {anterior && (
           <button className="enlace gris" onClick={() => poner({ fase: 'ingreso' })}>
@@ -93,6 +94,34 @@ export function Bienvenida() {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Demostración: un plantel de ejemplo con seis semanas de datos, para conocer la app sin operarios. */
+function BotonDemo() {
+  const [ocupado, setOcupado] = useState(false);
+  const [error, setError] = useState('');
+  return (
+    <div className="demo-entrada">
+      <button
+        className="boton"
+        disabled={ocupado}
+        onClick={async () => {
+          setOcupado(true);
+          setError('');
+          try {
+            await entrarDemo(nombreEquipo());
+          } catch (e) {
+            setError(mensajeError(e));
+            setOcupado(false);
+          }
+        }}
+      >
+        <PlayCircle size={22} aria-hidden /> {ocupado ? 'Preparando la demostración…' : 'Ver una demostración'}
+      </button>
+      <p className="chico suave">Un plantel de ejemplo con seis semanas de datos inventados. Puedes verlo como supervisor y como operario.</p>
+      {error && <p className="error-texto">{error}</p>}
     </div>
   );
 }

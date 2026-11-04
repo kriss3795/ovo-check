@@ -438,12 +438,18 @@ $$;
 -- Galpones en producción de los planteles que se están usando. Un plantel que ya tiene registros conserva su cupo
 -- aunque pase meses sin abrir la app (por ejemplo, durante un vacío sanitario largo). Uno que nunca registró nada
 -- solo cuenta mientras alguien lo abra (30 días).
+-- Plantel de demostración (datos de ejemplo, se borra solo al día siguiente): no ocupa cupos.
+create or replace function oc__es_demo(g oc_granjas) returns boolean
+language sql immutable as $$
+  select coalesce((g.config ->> 'demo')::boolean, false);
+$$;
+
 create or replace function oc__galpones_en_uso() returns integer
 language sql stable security definer set search_path = public, pg_temp as $$
   select coalesce(sum((select count(*) from jsonb_array_elements(g.config -> 'galpones') x
                        where coalesce((x ->> 'activo')::boolean, true))), 0)::int
   from oc_granjas g
-  where jsonb_typeof(g.config -> 'galpones') = 'array'
+  where jsonb_typeof(g.config -> 'galpones') = 'array' and not oc__es_demo(g)
     and exists (select 1 from oc_dispositivos d where d.granja_id = g.id
                 and d.visto > now() - make_interval(days => case
                   when exists (select 1 from oc_registros r where r.granja_id = g.id) then oc__dias_abandono() else 30 end));
@@ -466,7 +472,7 @@ begin
     return jsonb_build_object('error', 'OC_BLOQUEO');
   end if;
   -- Cupos: un plantel nuevo solo entra si hay espacio de sobra para los que ya están trabajando.
-  if (select count(*) from oc_granjas) >= coalesce(oc__ajuste('max_granjas')::int, 100) then
+  if (select count(*) from oc_granjas x where not oc__es_demo(x)) >= coalesce(oc__ajuste('max_granjas')::int, 100) then
     return jsonb_build_object('error', 'OC_CUPO_GRANJAS');
   end if;
   m := oc__medir();
@@ -479,7 +485,7 @@ begin
     return jsonb_build_object('error', 'OC_CUPO_GRANJAS');
   end if;
   -- Si la app se hace conocida de golpe, los planteles nuevos entran de a pocos por día.
-  if (select count(*) from oc_granjas where creado > now() - interval '1 day') >= coalesce(oc__ajuste('max_granjas_dia')::int, 8) then
+  if (select count(*) from oc_granjas x where x.creado > now() - interval '1 day' and not oc__es_demo(x)) >= coalesce(oc__ajuste('max_granjas_dia')::int, 8) then
     return jsonb_build_object('error', 'OC_CUPO_HOY');
   end if;
   n := oc__norma(cfg -> 'granja' ->> 'nombre');
@@ -1510,6 +1516,7 @@ create or replace function oc_limpieza(p jsonb) returns jsonb
 language plpgsql security definer set search_path = public, pg_temp as $$
 declare n integer;
 begin
+  perform oc__borrar_demos();
   delete from oc_granjas g
     where g.creado < now() - make_interval(days => oc__dias_abandono())
       -- Nunca sin aviso: a sus supervisores se les escribió al menos 25 días antes.
@@ -1837,6 +1844,62 @@ begin
   delete from oc_suscripciones where usuario_id = u ->> 'id';
   perform oc__bitacora(g.id, s, 'Datos personales eliminados', jsonb_build_array(etiqueta, n || ' registros'));
   return jsonb_build_object('ok', true, 'registros', n, 'nombre', etiqueta);
+end $$;
+
+-- ===================== Demostración =====================
+-- Un plantel de ejemplo con varias semanas de datos inventados, para conocer la app sin tener operarios.
+-- Los datos los arma la app (con las mismas tareas y cálculos de siempre); aquí solo se guardan.
+-- Se borra solo a las 24 horas. No ocupa cupos de planteles. {config, registros: [...], dispositivo}
+create or replace function oc__borrar_demos() returns void
+language sql security definer set search_path = public, pg_temp as $$
+  delete from oc_granjas g where oc__es_demo(g) and g.creado < now() - interval '24 hours';
+$$;
+
+create or replace function oc_demo_crear(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  g oc_granjas; d oc_dispositivos; s uuid; cfg jsonb := p -> 'config'; sup jsonb; cod text; nombre text;
+  origen text := oc__origen(); r jsonb; n integer := 0;
+begin
+  if oc__frenado('demo:' || origen, case when origen = 'sin-ip' then 30 else 5 end, interval '1 day') then
+    return jsonb_build_object('error', 'OC_BLOQUEO');
+  end if;
+  perform oc__borrar_demos();
+  -- Nunca más de 15 demostraciones vivas: si hay más, se borra la más antigua.
+  delete from oc_granjas viejas where viejas.id in (
+    select x.id from oc_granjas x where oc__es_demo(x) order by x.creado desc offset 14);
+  if oc__lleno() or jsonb_typeof(cfg) <> 'object' or jsonb_typeof(p -> 'registros') <> 'array'
+     or jsonb_array_length(p -> 'registros') > 4000 or length(p::text) > 9000000 or length(cfg::text) > 200000 then
+    raise exception 'OC_DATOS';
+  end if;
+  select u into sup from jsonb_array_elements(cfg -> 'usuarios') u where u ->> 'rol' = 'supervisor' limit 1;
+  if sup is null then
+    raise exception 'OC_DATOS';
+  end if;
+  perform oc__anotar('demo:' || origen);
+  cod := oc__codigo_nuevo();
+  nombre := 'Demostración ' || upper(left(md5(random()::text), 4));
+  cfg := cfg || jsonb_build_object('demo', true);
+  insert into oc_granjas (nombre, nombre_norm, clave_operarios, codigo, config)
+    values (nombre, oc__norma(nombre) || left(md5(random()::text), 6), 'demo' || left(md5(random()::text), 10), cod, cfg) returning * into g;
+  cfg := jsonb_set(cfg, '{granja}', (cfg -> 'granja') || jsonb_build_object('id', g.id, 'codigo', cod, 'nombre', nombre));
+  update oc_granjas set config = cfg where id = g.id returning * into g;
+  insert into oc_dispositivos (granja_id, token, nombre, visto, usuario_id, reconocido, avisado)
+    values (g.id, oc__token_nuevo(), left(coalesce(p ->> 'dispositivo', ''), 60), now(), sup ->> 'id', true, true) returning * into d;
+  insert into oc_sesiones (granja_id, dispositivo_id, usuario_id) values (g.id, d.id, sup ->> 'id') returning id into s;
+  for r in select * from jsonb_array_elements(p -> 'registros') loop
+    if coalesce(r ->> 'id', '') !~ '^[0-9a-f-]{36}$' or coalesce(r ->> 'fecha', '') !~ '^\d{4}-\d{2}-\d{2}$' or length(r::text) > 6000 then
+      continue;
+    end if;
+    insert into oc_registros (id, granja_id, dispositivo_id, fecha, galpon_id, datos, capturado, reloj_desfase_s, demora_s, critico)
+      values ((r ->> 'id')::uuid, g.id, d.id, (r ->> 'fecha')::date, r ->> 'galpon_id', r - 'capturado' - 'recibido',
+              coalesce((r ->> 'capturado_dispositivo')::timestamptz, now()), 0, 0,
+              coalesce(jsonb_typeof(r -> 'flags') = 'array' and (r -> 'flags') ?| array['problema', 'retrocede', 'no_calza', 'ilogico', 'gps_apagado'], false))
+      on conflict (id) do nothing;
+    n := n + 1;
+  end loop;
+  return jsonb_build_object('token', d.token, 'dispositivo_id', d.id, 'sesion', s, 'usuario_id', sup ->> 'id', 'version', g.version,
+    'config', oc__config_para(g, true), 'clave_operarios', g.clave_operarios, 'registros', n);
 end $$;
 
 select 'Ovo Check instalado' as resultado;

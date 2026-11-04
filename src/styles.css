@@ -2012,3 +2012,62 @@ table.datos td.falta {
     padding: 4px 6px;
   }
 }
+
+/* Demostración */
+.demo-entrada {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  text-align: center;
+}
+.franja-demo {
+  position: fixed;
+  left: 50%;
+  bottom: calc(76px + var(--pie));
+  transform: translateX(-50%);
+  z-index: 60;
+  width: min(760px, calc(100% - 24px));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+  padding: 10px 14px;
+  font-size: 14.5px;
+  color: #fff;
+  background: var(--tinta);
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgba(28, 40, 45, 0.25);
+}
+.franja-demo-botones {
+  display: flex;
+  gap: 8px;
+}
+.franja-demo-botones button {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  background: transparent;
+}
+.franja-demo-botones button:first-child {
+  background: var(--yema);
+  border-color: var(--yema);
+  color: var(--tinta);
+}
+@media (min-width: 900px) {
+  .franja-demo {
+    bottom: 18px;
+    left: calc(50% + 110px);
+  }
+}
+@media print {
+  .franja-demo {
+    display: none !important;
+  }
+}
